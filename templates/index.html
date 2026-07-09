@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Crypto Tracker — Live crypto prices{% endblock %}
+{% block content %}
+<section class="hero">
+  <div class="hero-text">
+    <h1>Track the crypto market <span class="accent">in real time</span></h1>
+    <p>Live prices for the top 10 cryptocurrencies, refreshed automatically every 30 seconds. Create a free account to open your personal dashboard.</p>
+    <div class="hero-actions">
+      <a class="btn btn-primary btn-lg" href="{{ url_for('register') }}">Get started</a>
+      <a class="btn btn-outline btn-lg" href="{{ url_for('login') }}">I already have an account</a>
+    </div>
+  </div>
+  <div class="hero-card">
+    <div class="hero-card-row"><span>Bitcoin</span><span class="up">BTC</span></div>
+    <div class="hero-card-row"><span>Ethereum</span><span class="up">ETH</span></div>
+    <div class="hero-card-row"><span>Solana</span><span class="down">SOL</span></div>
+    <div class="hero-card-note">Sign in to see live prices →</div>
+  </div>
+</section>
+
+<section class="features">
+  <div class="feature"><h3>Live data</h3><p>Powered by the free CoinGecko public API.</p></div>
+  <div class="feature"><h3>Auto refresh</h3><p>Market data updates every 30 seconds — no reload needed.</p></div>
+  <div class="feature"><h3>Dark & responsive</h3><p>A modern UI that looks great on any screen.</p></div>
+</section>
+{% endblock %}

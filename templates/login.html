@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Log in — Crypto Tracker{% endblock %}
+{% block content %}
+<section class="auth-wrap">
+  <div class="auth-card">
+    <h2>Welcome back</h2>
+    <p class="auth-sub">Log in to open your dashboard.</p>
+    <form method="post" class="auth-form" novalidate>
+      <label>
+        Username
+        <input type="text" name="username" value="{{ username or '' }}" autocomplete="username" required autofocus />
+      </label>
+      <label>
+        Password
+        <input type="password" name="password" autocomplete="current-password" required />
+      </label>
+      <button type="submit" class="btn btn-primary btn-block">Log in</button>
+    </form>
+    <p class="auth-alt">No account yet? <a href="{{ url_for('register') }}">Create one</a></p>
+  </div>
+</section>
+{% endblock %}

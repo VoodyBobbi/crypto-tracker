@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Crypto Tracker{% endblock %}
+{% block content %}
+<section class="dash-head">
+  <div>
+    <h1>Top 10 Cryptocurrencies</h1>
+    <p class="dash-sub">Ranked by market capitalization · prices in USD</p>
+  </div>
+  <div class="dash-status">
+    <span class="dot" id="status-dot"></span>
+    <span id="status-text">Loading…</span>
+    <button id="refresh-btn" class="btn btn-outline" type="button">Refresh</button>
+  </div>
+</section>
+
+<div class="table-wrap">
+  <table class="coins-table">
+    <thead>
+      <tr>
+        <th class="col-rank">#</th>
+        <th class="col-coin">Coin</th>
+        <th class="col-num">Price</th>
+        <th class="col-num">24h</th>
+        <th class="col-num">Market Cap</th>
+      </tr>
+    </thead>
+    <tbody id="coins-body">
+      <tr><td colspan="5" class="table-empty">Loading market data…</td></tr>
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}
