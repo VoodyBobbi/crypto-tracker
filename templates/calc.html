@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}Калькулятор сетки — Crypto Tracker{% endblock %}
+{% block main_class %}container-wide{% endblock %}
+
+{% block content %}
+<section class="calc-layout">
+
+  <!-- ------------------------- Выбор инструмента ------------------------- -->
+  <aside class="picker" aria-label="Выбор торговой пары">
+    <div class="picker-head">
+      <h2>Инструменты MEXC</h2>
+      <p class="picker-sub">Бессрочные фьючерсы. Выберите пару — цена подставится сама.</p>
+      <div class="search-box">
+        <svg class="search-icon" viewBox="0 0 20 20" aria-hidden="true">
+          <circle cx="9" cy="9" r="6" fill="none" stroke="currentColor" stroke-width="1.8"/>
+          <line x1="13.5" y1="13.5" x2="18" y2="18" stroke="currentColor" stroke-width="1.8"
+                stroke-linecap="round"/>
+        </svg>
+        <input id="pair-search" type="search" placeholder="BTC, SOL, CAKE_USDT…"
+               autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="picker-meta">
+        <span id="picker-count">Загружаю список…</span>
+        <button id="picker-reload" class="link-btn" type="button">Обновить</button>
+      </div>
+    </div>
+    <ul class="pair-list" id="pair-list">
+      <li class="pair-empty">Загружаю контракты с contract.mexc.com…</li>
+    </ul>
+  </aside>
+
+  <!-- --------------------------- Калькулятор ---------------------------- -->
+  <div class="calc-main">
+
+    <header class="calc-head">
+      <div class="calc-title">
+        <h1 id="calc-symbol">Пара не выбрана</h1>
+        <p class="calc-sub" id="calc-meta">
+          Можно считать и без пары: введите цену входа вручную.
+        </p>
+      </div>
+      <div class="price-tag" id="price-tag" hidden>
+        <span class="price-tag-label">Последняя цена</span>
+        <strong id="price-value">—</strong>
+        <button id="use-price" class="link-btn" type="button">Подставить в шаг 1</button>
+      </div>
+    </header>
+
+    <form class="calc-form" id="calc-form" autocomplete="off">
+      <input type="hidden" id="symbol" name="symbol" value="" />
+
+      <fieldset class="field-group">
+        <legend>Что известно</legend>
+        <div class="segmented" role="radiogroup" aria-label="Режим расчёта">
+          <label>
+            <input type="radio" name="mode" value="target" checked />
+            <span>Цель ликвидации → подобрать плечо</span>
+          </label>
+          <label>
+            <input type="radio" name="mode" value="leverage" />
+            <span>Плечо задано</span>
+          </label>
+        </div>
+      </fieldset>
+
+      <div class="field-row">
+        <label class="field">
+          <span>Цена входа, шаг 1</span>
+          <input id="p1" name="p1" inputmode="decimal" placeholder="1.4307" required />
+          <small>Разрядность вывода берётся отсюда</small>
+        </label>
+
+        <label class="field" id="field-target">
+          <span>Ликвидация шага 4 (цель)</span>
+          <input id="target_liq" name="target_liq" inputmode="decimal" placeholder="1.26" />
+          <small>Плечо подбирается численно, затем округляется</small>
+        </label>
+
+        <label class="field" id="field-leverage" hidden>
+          <span>Плечо</span>
+          <input id="leverage" name="leverage" inputmode="numeric" placeholder="19" />
+          <small>Ликвидация получится как результат</small>
+        </label>
+      </div>
+
+      <fieldset class="field-group">
+        <legend>Запас маржи до ликвидации (k)</legend>
+        <div class="segmented segmented-3" role="radiogroup" aria-label="Источник k">
+          <label>
+            <input type="radio" name="k_mode" value="ideal" checked />
+            <span>k = 1.0</span>
+          </label>
+          <label>
+            <input type="radio" name="k_mode" value="mexc" />
+            <span>Тиры MMR с биржи</span>
+          </label>
+          <label>
+            <input type="radio" name="k_mode" value="manual" />
+            <span>Свой k</span>
+          </label>
+        </div>
+        <p class="hint" id="k-hint">
+          Идеализация: ликвидация ровно при исчерпании всей маржи. На бирже
+          она наступает раньше — часть маржи резервируется.
+        </p>
+        <label class="field field-inline" id="field-k" hidden>
+          <span>k, доля или проценты</span>
+          <input id="k_manual" name="k_manual" inputmode="decimal" placeholder="0.783" />
+        </label>
+      </fieldset>
+
+      <div class="calc-actions">
+        <button class="btn btn-primary btn-lg" type="submit">Рассчитать сетку</button>
+        <button class="btn btn-outline" type="button" id="reset-btn">Сбросить</button>
+      </div>
+    </form>
+
+    <div id="calc-error" class="flash flash-error" hidden></div>
+    <div id="calc-warnings" class="warn-stack" hidden></div>
+
+    <!-- ------------------------------ Вывод ------------------------------ -->
+    <section id="result" hidden>
+      <div class="result-head">
+        <div class="result-lev">
+          <span>Плечо</span>
+          <strong id="res-leverage">—</strong>
+        </div>
+        <dl class="result-stats" id="res-stats"></dl>
+      </div>
+
+      <div class="table-wrap">
+        <table class="grid-table">
+          <thead>
+            <tr>
+              <th class="col-step">Шаг</th>
+              <th class="col-num">Цена входа</th>
+              <th class="col-num">Маржа USDT</th>
+              <th class="col-num">Плечо</th>
+              <th class="col-num">Ликвидация</th>
+              <th class="col-path">% пути</th>
+            </tr>
+          </thead>
+          <tbody id="grid-body"></tbody>
+        </table>
+      </div>
+
+      <details class="details-box">
+        <summary>Промежуточные величины</summary>
+        <div class="table-wrap">
+          <table class="grid-table grid-table-sub">
+            <thead>
+              <tr>
+                <th class="col-step">Шаг</th>
+                <th class="col-num">Монет</th>
+                <th class="col-num">Всего монет</th>
+                <th class="col-num">Средняя</th>
+                <th class="col-num">Объём, USDT</th>
+                <th class="col-num">k</th>
+                <th class="col-num">MMR / тир</th>
+                <th class="col-num">Комиссия</th>
+              </tr>
+            </thead>
+            <tbody id="detail-body"></tbody>
+          </table>
+        </div>
+      </details>
+    </section>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/calc.js') }}"></script>
+{% endblock %}

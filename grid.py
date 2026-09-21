@@ -1,0 +1,208 @@
+"""Ядро расчёта сеточной стратегии (LONG, изолированная маржа).
+
+Часть 1 технического задания. Чистая математика: никаких сетевых запросов,
+никаких зависимостей кроме стандартной библиотеки (scipy используется, если
+установлена, иначе работает встроенная бисекция).
+
+Публичный интерфейс:
+    build_grid(p1, leverage, k=1.0, mmr_fn=None) -> list[dict]
+    solve_leverage(p1, target_liq, k=1.0, mmr_fn=None) -> (exact, rounded)
+    decimals_of(value) -> int
+"""
+
+from __future__ import annotations
+
+from typing import Callable, Optional
+
+# --------------------------------------------------------------------------- #
+# Константы (п. 1.2 ТЗ)
+# --------------------------------------------------------------------------- #
+MARGINS = (1.0, 2.0, 3.0, 4.0)   # маржа по шагам, сумма = 10 USDT
+ENTRY_COEF = 0.85                # вход на 85% пути от средней до ликвидации
+STEPS = len(MARGINS)
+
+LEVERAGE_MIN = 1.5               # нижняя граница интервала поиска плеча
+LEVERAGE_MAX = 500.0             # верхняя граница
+
+# mmr_fn(cum_coins) -> maintenance margin rate для текущего размера позиции
+MmrFn = Callable[[float], float]
+
+
+class GridError(ValueError):
+    """Некорректные входные данные или недостижимая цель."""
+
+
+# --------------------------------------------------------------------------- #
+# Вспомогательное
+# --------------------------------------------------------------------------- #
+def decimals_of(value) -> int:
+    """Количество знаков после запятой в том виде, в каком число введено.
+
+    '1.4307' -> 4, '100' -> 0, 1.25 -> 2. Экспоненциальная запись не
+    поддерживается намеренно: цены в неё не пишут.
+    """
+    text = str(value).strip()
+    if "e" in text.lower():
+        return 8
+    if "." not in text:
+        return 0
+    return len(text.split(".", 1)[1].rstrip())
+
+
+def _k_for_step(leverage: float, k_const: float, mmr_fn: Optional[MmrFn],
+                cum_coins: float) -> float:
+    """Доля маржи до ликвидации на конкретном шаге.
+
+    Без метаданных биржи k постоянна. С тирами MMR k = 1 - MMR * L и
+    пересчитывается на каждом шаге, потому что размер позиции растёт и
+    может перескочить в следующий тир (п. 2.5 ТЗ).
+    """
+    if mmr_fn is None:
+        return k_const
+    mmr = float(mmr_fn(cum_coins))
+    k = 1.0 - mmr * leverage
+    # Плечо выше 1/MMR означает, что тир его не допускает; не даём k уйти в ноль.
+    return min(1.0, max(0.01, k))
+
+
+# --------------------------------------------------------------------------- #
+# Построение таблицы (п. 1.4 ТЗ)
+# --------------------------------------------------------------------------- #
+def build_grid(p1: float, leverage: float, k: float = 1.0,
+               mmr_fn: Optional[MmrFn] = None) -> list[dict]:
+    """Строит все 4 шага сетки для цены входа p1 и плеча leverage."""
+    p1 = float(p1)
+    leverage = float(leverage)
+    if p1 <= 0:
+        raise GridError("Цена входа должна быть больше нуля.")
+    if leverage <= 1:
+        raise GridError("Плечо должно быть больше 1.")
+    if not 0 < k <= 1:
+        raise GridError("k должно лежать в диапазоне (0, 1].")
+
+    rows: list[dict] = []
+    cum_margin = 0.0
+    cum_coins = 0.0
+    price = p1
+
+    for i, margin in enumerate(MARGINS):
+        if i > 0:
+            prev = rows[-1]
+            # Вход на 85% пути от средней цены до ликвидации предыдущего шага.
+            price = prev["avg"] - ENTRY_COEF * (prev["avg"] - prev["liq"])
+            if price <= 0:
+                raise GridError(
+                    "Цепочка ушла в отрицательные цены — плечо слишком велико."
+                )
+
+        # Множитель leverage обязателен: margin / price без плеча ломает цепочку.
+        coins = margin * leverage / price
+        cum_margin += margin
+        cum_coins += coins
+        avg = leverage * cum_margin / cum_coins
+        step_k = _k_for_step(leverage, k, mmr_fn, cum_coins)
+        liq = avg * (1 - step_k / leverage)
+
+        rows.append({
+            "step": i + 1,
+            "price": price,
+            "margin": margin,
+            "leverage": leverage,
+            "coins": coins,
+            "cum_coins": cum_coins,
+            "cum_margin": cum_margin,
+            "position_value": cum_coins * price,
+            "avg": avg,
+            "liq": liq,
+            "k": step_k,
+        })
+
+    # Колонка «% пути»: знаменатель — цена входа шага 4, не ликвидация.
+    p_first, p_last = rows[0]["price"], rows[-1]["price"]
+    span = p_first - p_last
+    for row in rows:
+        row["pct_path"] = (p_first - row["price"]) / span * 100 if span else 0.0
+
+    return rows
+
+
+# --------------------------------------------------------------------------- #
+# Подбор плеча (Режим A, п. 1.5 ТЗ)
+# --------------------------------------------------------------------------- #
+def _residual(p1: float, target_liq: float, k: float,
+              mmr_fn: Optional[MmrFn]) -> Callable[[float], float]:
+    def f(leverage: float) -> float:
+        return build_grid(p1, leverage, k, mmr_fn)[-1]["liq"] - target_liq
+    return f
+
+
+def _bisect(f: Callable[[float], float], lo: float, hi: float,
+            xtol: float = 1e-10, max_iter: int = 200) -> float:
+    """Бисекция на случай, когда scipy не установлена. Функция монотонна."""
+    f_lo, f_hi = f(lo), f(hi)
+    if f_lo * f_hi > 0:
+        raise GridError("Корень не найден в интервале плеча.")
+    for _ in range(max_iter):
+        mid = (lo + hi) / 2
+        f_mid = f(mid)
+        if f_mid == 0 or (hi - lo) / 2 < xtol:
+            return mid
+        if f_lo * f_mid < 0:
+            hi, f_hi = mid, f_mid
+        else:
+            lo, f_lo = mid, f_mid
+    return (lo + hi) / 2
+
+
+def solve_leverage(p1: float, target_liq: float, k: float = 1.0,
+                   mmr_fn: Optional[MmrFn] = None,
+                   max_leverage: Optional[float] = None) -> tuple[float, int]:
+    """Подбирает плечо так, чтобы ликвидация шага 4 попала в target_liq.
+
+    Возвращает (точное плечо, округлённое до целого). Итоговая ликвидация
+    после округления отклонится от цели — это ожидаемо и не компенсируется.
+    """
+    p1 = float(p1)
+    target_liq = float(target_liq)
+    if target_liq <= 0:
+        raise GridError("Целевая ликвидация должна быть больше нуля.")
+    if target_liq >= p1:
+        raise GridError("Целевая ликвидация должна быть ниже цены входа (LONG).")
+
+    hi = float(max_leverage) if max_leverage else LEVERAGE_MAX
+    hi = min(hi, LEVERAGE_MAX)
+    if hi <= LEVERAGE_MIN:
+        raise GridError("Максимальное плечо контракта слишком мало для расчёта.")
+
+    f = _residual(p1, target_liq, k, mmr_fn)
+
+    # Проверяем достижимость до решения, чтобы дать внятную ошибку.
+    try:
+        f_lo, f_hi = f(LEVERAGE_MIN), f(hi)
+    except GridError:
+        raise GridError("Цель недостижима: цепочка расходится при таком плече.")
+    if f_lo * f_hi > 0:
+        # liq[4] растёт вместе с плечом, поэтому границы интервала задают
+        # весь достижимый диапазон ликвидации.
+        liq_lo, liq_hi = f_lo + target_liq, f_hi + target_liq
+        if f_hi < 0:
+            raise GridError(
+                f"Цель недостижима: при максимальном плече {hi:g}x ликвидация "
+                f"шага 4 равна {liq_hi:.6g}, это ниже цели {target_liq:g}. "
+                "Опустите цель или выберите контракт с бо́льшим плечом."
+            )
+        raise GridError(
+            f"Цель недостижима: даже при плече {LEVERAGE_MIN:g}x ликвидация "
+            f"шага 4 равна {liq_lo:.6g}, это выше цели {target_liq:g}. "
+            "Поднимите цель ближе к цене входа."
+        )
+
+    try:
+        from scipy.optimize import brentq  # type: ignore
+        exact = float(brentq(f, LEVERAGE_MIN, hi, xtol=1e-10))
+    except ImportError:
+        exact = _bisect(f, LEVERAGE_MIN, hi)
+
+    rounded = int(round(exact))
+    rounded = max(2, min(rounded, int(hi)))
+    return exact, rounded

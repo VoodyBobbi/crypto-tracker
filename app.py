@@ -26,6 +26,9 @@ from flask import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
+import mexc
+from grid import GridError, build_grid, decimals_of, solve_leverage
+
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 USERS_FILE = os.path.join(BASE_DIR, "users.json")
 
@@ -45,6 +48,7 @@ _cache = {"data": None, "ts": 0.0}
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
+app.json.ensure_ascii = False  # кириллица в ответах API читается как есть
 
 
 # --------------------------------------------------------------------------- #
@@ -189,6 +193,208 @@ def api_coins():
     _cache["data"] = payload
     _cache["ts"] = now
     return jsonify(payload)
+
+
+# --------------------------------------------------------------------------- #
+# Калькулятор сетки: страница и API
+# --------------------------------------------------------------------------- #
+@app.route("/calc")
+def calc():
+    """Калькулятор доступен без регистрации — это локальный инструмент."""
+    return render_template("calc.html")
+
+
+@app.route("/api/mexc/search")
+def api_mexc_search():
+    """Список фьючерсных контрактов для панели выбора пары."""
+    query = request.args.get("q", "")
+    try:
+        limit = max(1, min(int(request.args.get("limit", 60)), 300))
+        results = mexc.search(query, limit=limit)
+        _, cached_at, fresh = mexc.load_contracts()
+    except mexc.MexcError as exc:
+        return jsonify({"error": str(exc)}), 502
+    except ValueError:
+        return jsonify({"error": "Некорректный параметр limit."}), 400
+
+    return jsonify({
+        "query": query,
+        "cached_at": cached_at,
+        "fresh": fresh,
+        "count": len(results),
+        "contracts": [
+            {
+                "symbol": c["symbol"],
+                "base": c["base"],
+                "quote": c["quote"],
+                "display_name": c["display_name"],
+                "max_leverage": c["max_leverage"],
+                "price_scale": c["price_scale"],
+                "is_hot": c["is_hot"],
+                "is_new": c["is_new"],
+            }
+            for c in results
+        ],
+    })
+
+
+@app.route("/api/mexc/contract/<symbol>")
+def api_mexc_contract(symbol):
+    """Метаданные контракта, текущая цена и ставка фандинга."""
+    try:
+        contract = mexc.get_contract(symbol)
+    except mexc.MexcError as exc:
+        return jsonify({"error": str(exc)}), 502
+    if not contract:
+        return jsonify({"error": f"Контракт {symbol} не найден."}), 404
+
+    ticker = funding = None
+    try:
+        ticker = mexc.get_ticker(symbol)
+    except mexc.MexcError:
+        pass
+    try:
+        funding = mexc.get_funding_rate(symbol)
+    except mexc.MexcError:
+        pass
+
+    return jsonify({"contract": contract, "ticker": ticker, "funding": funding})
+
+
+@app.route("/api/mexc/raw/<symbol>")
+def api_mexc_raw(symbol):
+    """Сырой JSON контракта — шаг 2 из порядка сборки (п. 2.6 ТЗ)."""
+    try:
+        data = mexc.fetch_raw_contract(symbol)
+    except mexc.MexcError as exc:
+        return jsonify({"error": str(exc)}), 502
+    return jsonify(data)
+
+
+def _grid_payload(form):
+    """Разбирает вход, строит сетку, собирает ответ для интерфейса."""
+    p1_raw = (form.get("p1") or "").strip().replace(",", ".")
+    if not p1_raw:
+        raise GridError("Укажите цену входа первого шага.")
+    p1 = float(p1_raw)
+
+    symbol = (form.get("symbol") or "").strip().upper() or None
+    contract = None
+    warnings = []
+    if symbol:
+        try:
+            contract = mexc.get_contract(symbol)
+        except mexc.MexcError as exc:
+            warnings.append(f"Метаданные MEXC недоступны: {exc}")
+
+    # --- k: идеализация, ручная калибровка или тиры MMR -------------------- #
+    k_mode = form.get("k_mode") or "ideal"
+    k_const = 1.0
+    mmr_fn = None
+
+    if k_mode == "manual":
+        k_const = float(str(form.get("k_manual") or 1).replace(",", "."))
+        if k_const > 1:                       # введено в процентах
+            k_const /= 100
+    elif k_mode == "mexc":
+        if contract:
+            mmr_fn = mexc.make_mmr_fn(contract)
+        else:
+            k_mode = "ideal"
+            warnings.append("Тиры MMR недоступны без пары — считаю с k = 1.0.")
+
+    # --- Режим A (подбор плеча) или Режим Б (плечо задано) ----------------- #
+    mode = form.get("mode") or "target"
+    max_lev = contract["max_leverage"] if contract else None
+    leverage_exact = None
+    target_liq = None
+
+    if mode == "target":
+        target_raw = (form.get("target_liq") or "").strip().replace(",", ".")
+        if not target_raw:
+            raise GridError("Укажите целевую ликвидацию четвёртого шага.")
+        target_liq = float(target_raw)
+        leverage_exact, leverage = solve_leverage(
+            p1, target_liq, k=k_const, mmr_fn=mmr_fn, max_leverage=max_lev
+        )
+    else:
+        lev_raw = (form.get("leverage") or "").strip().replace(",", ".")
+        if not lev_raw:
+            raise GridError("Укажите плечо.")
+        leverage = int(round(float(lev_raw)))
+
+    if max_lev and leverage > max_lev:
+        warnings.append(
+            f"Нужно плечо {leverage}x, контракт допускает максимум {max_lev:g}x. "
+            "Цель в этой паре недостижима."
+        )
+
+    rows = build_grid(p1, leverage, k=k_const, mmr_fn=mmr_fn)
+
+    # С парой разрядность диктует биржа (priceScale). Без пары — разрядность
+    # введённого P1, но не меньше 4 знаков: иначе «100» схлопнет всю таблицу
+    # в целые числа и разойдётся с контрольным примером из п. 1.7 ТЗ.
+    places = contract["price_scale"] if contract else max(decimals_of(p1_raw), 4)
+    taker = contract["taker_fee"] if contract else 0.0
+
+    out_rows = []
+    for row in rows:
+        out_rows.append({
+            "step": row["step"],
+            "price": round(row["price"], places),
+            "price_tick": round(mexc.round_to_tick(row["price"], contract), places),
+            "margin": row["margin"],
+            "leverage": leverage,
+            "liq": round(row["liq"], places),
+            "pct_path": row["pct_path"],
+            "k": row["k"],
+            "avg": round(row["avg"], places),
+            "coins": row["coins"],
+            "cum_coins": row["cum_coins"],
+            "cum_margin": row["cum_margin"],
+            "position_value": row["cum_coins"] * row["price"],
+            "fee": row["margin"] * leverage * taker,
+            "mmr": mexc.mmr_for_volume(contract, row["cum_coins"]) if contract else None,
+            "tier": mexc.tier_for_volume(contract, row["cum_coins"]) if contract else None,
+        })
+
+    if contract:
+        step1_vol = rows[0]["coins"] / (contract["contract_size"] or 1.0)
+        if step1_vol < contract["min_vol"]:
+            warnings.append(
+                f"Шаг 1 даёт {step1_vol:.4f} контракта при минимуме "
+                f"{contract['min_vol']:g} — первый ордер не пройдёт."
+            )
+
+    return {
+        "mode": mode,
+        "k_mode": k_mode,
+        "symbol": symbol,
+        "p1": p1,
+        "places": places,
+        "leverage": leverage,
+        "leverage_exact": leverage_exact,
+        "target_liq": target_liq,
+        "liq_final": out_rows[-1]["liq"],
+        "liq_delta": (out_rows[-1]["liq"] - target_liq) if target_liq else None,
+        "total_margin": rows[-1]["cum_margin"],
+        "total_coins": rows[-1]["cum_coins"],
+        "total_fee": sum(r["fee"] for r in out_rows),
+        "rows": out_rows,
+        "contract": contract,
+        "warnings": warnings,
+    }
+
+
+@app.route("/api/grid", methods=["POST"])
+def api_grid():
+    form = request.get_json(silent=True) or request.form
+    try:
+        return jsonify(_grid_payload(form))
+    except GridError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except (TypeError, ValueError):
+        return jsonify({"error": "Проверьте числа во входных полях."}), 400
 
 
 if __name__ == "__main__":
