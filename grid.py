@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Callable, Optional
 
 # --------------------------------------------------------------------------- #
@@ -53,16 +54,27 @@ def _k_for_step(leverage: float, k_const: float, mmr_fn: Optional[MmrFn],
                 cum_coins: float) -> float:
     """Доля маржи до ликвидации на конкретном шаге.
 
-    Без метаданных биржи k постоянна. С тирами MMR k = 1 - MMR * L и
-    пересчитывается на каждом шаге, потому что размер позиции растёт и
-    может перескочить в следующий тир (п. 2.5 ТЗ).
+    Без данных биржи k постоянна. С тирами MMR k = 1 - MMR * L и
+    пересчитывается на каждом шаге: позиция растёт и может перескочить
+    в следующий тир.
     """
     if mmr_fn is None:
         return k_const
-    mmr = float(mmr_fn(cum_coins))
-    k = 1.0 - mmr * leverage
-    # Плечо выше 1/MMR означает, что тир его не допускает; не даём k уйти в ноль.
-    return min(1.0, max(0.01, k))
+
+    mmr = mmr_fn(cum_coins)
+    if mmr is None:
+        raise GridError("Нет ставки поддерживающей маржи — расчёт невозможен.")
+
+    k = 1.0 - float(mmr) * leverage
+    if k <= 0:
+        # MMR * L >= 1: ликвидация оказывается выше средней цены, позиции
+        # с таким плечом не существует. Клампить это нельзя — получится
+        # нарисованная таблица вместо ошибки.
+        raise GridError(
+            f"Плечо {leverage:g}x невозможно при MMR {float(mmr) * 100:.3f}%: "
+            f"предел для этой монеты — {1 / float(mmr):.0f}x."
+        )
+    return min(1.0, k)
 
 
 # --------------------------------------------------------------------------- #
@@ -111,7 +123,7 @@ def build_grid(p1: float, leverage: float, k: float = 1.0,
             "coins": coins,
             "cum_coins": cum_coins,
             "cum_margin": cum_margin,
-            "position_value": cum_coins * price,
+            "position_value": leverage * cum_margin,   # = avg * cum_coins
             "avg": avg,
             "liq": liq,
             "k": step_k,
@@ -154,6 +166,29 @@ def _bisect(f: Callable[[float], float], lo: float, hi: float,
     return (lo + hi) / 2
 
 
+def _max_feasible(f: Callable[[float], float], lo: float, hi: float) -> float:
+    """Наибольшее плечо в [lo, hi], на котором сетка вообще строится."""
+    try:
+        f(hi)
+        return hi
+    except GridError:
+        pass
+    try:
+        f(lo)
+    except GridError as exc:
+        raise GridError(f"Сетку не построить даже при плече {lo:g}x. {exc}") from exc
+
+    good, bad = lo, hi
+    for _ in range(60):
+        mid = (good + bad) / 2
+        try:
+            f(mid)
+            good = mid
+        except GridError:
+            bad = mid
+    return good
+
+
 def solve_leverage(p1: float, target_liq: float, k: float = 1.0,
                    mmr_fn: Optional[MmrFn] = None,
                    max_leverage: Optional[float] = None) -> tuple[float, int]:
@@ -176,11 +211,12 @@ def solve_leverage(p1: float, target_liq: float, k: float = 1.0,
 
     f = _residual(p1, target_liq, k, mmr_fn)
 
+    # MMR ограничивает плечо сверху жёстче, чем лимит контракта: при MMR * L >= 1
+    # позиция невозможна. Ищем наибольшее плечо, на котором сетка ещё строится.
+    hi = _max_feasible(f, LEVERAGE_MIN, hi)
+
     # Проверяем достижимость до решения, чтобы дать внятную ошибку.
-    try:
-        f_lo, f_hi = f(LEVERAGE_MIN), f(hi)
-    except GridError:
-        raise GridError("Цель недостижима: цепочка расходится при таком плече.")
+    f_lo, f_hi = f(LEVERAGE_MIN), f(hi)
     if f_lo * f_hi > 0:
         # liq[4] растёт вместе с плечом, поэтому границы интервала задают
         # весь достижимый диапазон ликвидации.
@@ -203,6 +239,7 @@ def solve_leverage(p1: float, target_liq: float, k: float = 1.0,
     except ImportError:
         exact = _bisect(f, LEVERAGE_MIN, hi)
 
-    rounded = int(round(exact))
+    # Обычное округление, не банковское: round(18.5) в Python даёт 18.
+    rounded = int(math.floor(exact + 0.5))
     rounded = max(2, min(rounded, int(hi)))
     return exact, rounded
