@@ -7,7 +7,8 @@
 from flask import Flask, jsonify, render_template, request
 
 import mexc
-from grid import GridError, build_grid, decimals_of, solve_leverage
+from grid import (GridError, build_grid, decimals_of, solve_leverage,
+                  solve_leverage_exchange)
 
 app = Flask(__name__)
 app.json.ensure_ascii = False
@@ -91,6 +92,12 @@ def calculate(data):
     if contract is not None and not mmr_known:
         notes.append("MEXC не дала ставку поддерживающей маржи для этой пары.")
 
+    # Биржа исполняет шаг не дробными монетами: из внесённой суммы уходит
+    # комиссия за открытие, остаток делится на стоимость целого контракта,
+    # дробь отбрасывается. Учитываем это, когда метаданные пары известны.
+    lot = contract["contract_size"] if contract else None
+    fee = (contract["taker_fee"] or 0.0) if contract else 0.0
+
     max_lev = contract["max_leverage"] if contract else None
 
     if data.get("mode") == "leverage":
@@ -101,9 +108,14 @@ def calculate(data):
             raise GridError(f"На этой паре плечо максимум {max_lev:g}x.")
     else:
         target = _number(data.get("target_liq"))
-        _, leverage = solve_leverage(p1, target, mmr_fn=mmr_fn, max_leverage=max_lev)
+        if lot:
+            _, leverage = solve_leverage_exchange(
+                p1, target, mmr_fn=mmr_fn, max_leverage=max_lev, lot=lot, fee=fee)
+        else:
+            _, leverage = solve_leverage(
+                p1, target, mmr_fn=mmr_fn, max_leverage=max_lev)
 
-    rows = build_grid(p1, leverage, mmr_fn=mmr_fn)
+    rows = build_grid(p1, leverage, mmr_fn=mmr_fn, lot=lot, fee=fee)
 
     places = contract["price_scale"] if contract else max(decimals_of(p1_raw), 4)
     mmr_step1 = (1 - rows[0]["k"]) / leverage
@@ -116,10 +128,22 @@ def calculate(data):
             f"меньше {limit:.3f}%. Выше — добор встанет ниже ликвидации."
         )
 
-    if contract:
-        step1_contracts = rows[0]["coins"] / (contract["contract_size"] or 1.0)
-        if contract["min_vol"] and step1_contracts < contract["min_vol"]:
-            notes.append("Первый шаг меньше минимального ордера биржи — он не пройдёт.")
+    if contract and contract["min_vol"]:
+        small = [r["step"] for r in rows
+                 if r["contracts"] is not None and r["contracts"] < contract["min_vol"]]
+        if small:
+            steps = ", ".join(str(n) for n in small)
+            notes.append(
+                f"Шаг {steps}: количество меньше минимального ордера биржи "
+                f"({contract['min_vol']:g} контр.) — такой ордер не пройдёт."
+            )
+
+    spent = sum(r["margin_used"] + r["fee"] for r in rows)
+    if lot and spent < 9.9:
+        notes.append(
+            f"Из 10 USDT биржа задействует {spent:.2f} — остальное не влезает "
+            "в целое число контрактов. Точки входа посчитаны по фактическим суммам."
+        )
 
     return {
         "leverage": leverage,
@@ -130,12 +154,17 @@ def calculate(data):
             "tier": mexc.tier_for_volume(contract, rows[0]["cum_coins"]) if mmr_known else None,
             "source": "MEXC" if mmr_known else "нет данных",
         },
+        "exchange_lots": bool(lot),
+        "qty_places": decimals_of(repr(lot).rstrip("0").rstrip(".")) if lot else 4,
         "notes": notes,
         "rows": [
             {
                 "step": r["step"],
                 "price": round(mexc.round_to_tick(r["price"], contract), places),
                 "margin": r["margin"],
+                "margin_used": round(r["margin_used"], 4),
+                "coins": r["coins"],
+                "contracts": r["contracts"],
                 "liq": round(mexc.round_to_tick(r["liq"], contract), places),
                 "pct": round(r["pct_path"], 2),
             }

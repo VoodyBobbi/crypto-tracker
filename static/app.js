@@ -162,7 +162,15 @@
       tr.append(first);
 
       tr.append(el("td", "right", fmt(r.price, d.places)));
-      tr.append(el("td", "right money", r.margin + " $"));
+
+      var cost = el("td", "right money");
+      cost.append(el("div", null, r.margin + " $"));
+      if (d.exchange_lots && Math.abs(r.margin_used - r.margin) > 0.005) {
+        cost.append(el("div", "sub", "факт " + r.margin_used.toFixed(2)));
+      }
+      tr.append(cost);
+
+      tr.append(el("td", "right qty", fmt(r.coins, d.qty_places)));
       tr.append(el("td", "right liq", fmt(r.liq, d.places)));
       tr.append(el("td", "right pct", r.pct.toFixed(2) + "%"));
 

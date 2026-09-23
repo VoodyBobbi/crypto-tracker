@@ -222,6 +222,8 @@ h1 { margin: 2px 0 16px; font-size: 1.7rem; font-weight: 900; }
 .liq { color: var(--red); }
 .money { color: var(--green); }
 .pct { color: var(--grey); }
+.qty { color: var(--ink); }
+.sub { font-size: 0.72rem; font-weight: 700; color: var(--grey); }
 
 .note {
   margin-top: 10px;
@@ -241,7 +243,11 @@ h1 { margin: 2px 0 16px; font-size: 1.7rem; font-weight: 900; }
 @media (max-width: 560px) {
   .page { padding: 14px 10px 30px; gap: 14px; }
   .card { padding: 13px 11px; }
-  .steps td { padding: 9px 5px; font-size: 0.92rem; }
-  .steps th { padding: 0 5px; font-size: 0.68rem; }
+  .steps td { padding: 9px 5px; font-size: 0.9rem; }
+  .steps th { padding: 0 5px; font-size: 0.66rem; }
+  /* На узком экране «% пути» уступает место количеству: без него ордер не поставить. */
+  .steps th:nth-child(6), .steps td:nth-child(6) { display: none; }
+  .steps td:nth-child(5) { border-right: var(--line); border-radius: 0 13px 13px 0; }
+  .sub { font-size: 0.66rem; }
   .ball.step { width: 24px; height: 24px; font-size: 0.75rem; }
 }

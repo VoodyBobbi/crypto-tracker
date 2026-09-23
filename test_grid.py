@@ -159,6 +159,38 @@ def test_entries_above_liquidation():
     return ok
 
 
+def test_exchange_lots():
+    """Целые контракты и комиссия: сверка с реальным ордером на бирже.
+
+    Скрин формы ордера: цена 1.7454, плечо 61x, внесён 1 USDT, тейкер 0.06% —
+    биржа набрала 33 контракта (дробное 33.71 отброшено вниз).
+    """
+    print("Тест 12: шаг считается целыми контрактами")
+    rows = build_grid(1.7454, 61, mmr_fn=lambda c: 0.004, lot=1.0, fee=0.0006)
+    ok = _ok("шаг 1 = 33 контракта", rows[0]["contracts"] == 33)
+    ok &= _ok("фактическая маржа меньше внесённой",
+              rows[0]["margin_used"] < rows[0]["margin"])
+    ok &= _ok("маржа + комиссия не превышают внесённое",
+              all(r["margin_used"] + r["fee"] <= r["margin"] + 1e-9 for r in rows))
+    ok &= _ok("количество кратно размеру контракта",
+              all(abs(r["coins"] / 1.0 - round(r["coins"] / 1.0)) < 1e-9 for r in rows))
+    ok &= _ok("средняя = объём / количество",
+              all(abs(r["avg"] * r["cum_coins"] - r["position_value"]) < 1e-6 for r in rows))
+    ok &= _ok("вход n+1 выше ликвидации n",
+              all(rows[i + 1]["price"] > rows[i]["liq"] for i in range(3)))
+    return ok
+
+
+def test_lots_do_not_break_ideal():
+    """Без размера контракта поведение прежнее — контрольные примеры ТЗ."""
+    print("Тест 13: режим без лотов не изменился")
+    rows = build_grid(100, 10)
+    ok = _ok("liq[4] = 78.0879", abs(rows[-1]["liq"] - 78.0879) < 5e-4)
+    ok &= _ok("contracts = None", rows[0]["contracts"] is None)
+    ok &= _ok("маржа не урезана", rows[0]["margin_used"] == rows[0]["margin"])
+    return ok
+
+
 if __name__ == "__main__":
     results = [
         test_mode_b(),
@@ -172,6 +204,8 @@ if __name__ == "__main__":
         test_rounding_and_value(),
         test_symbols(),
         test_entries_above_liquidation(),
+        test_exchange_lots(),
+        test_lots_do_not_break_ideal(),
     ]
     print()
     print("ВСЕ ТЕСТЫ ПРОЙДЕНЫ" if all(results) else "ЕСТЬ ПРОВАЛЕННЫЕ ТЕСТЫ")

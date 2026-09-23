@@ -81,8 +81,18 @@ def _k_for_step(leverage: float, k_const: float, mmr_fn: Optional[MmrFn],
 # Построение таблицы (п. 1.4 ТЗ)
 # --------------------------------------------------------------------------- #
 def build_grid(p1: float, leverage: float, k: float = 1.0,
-               mmr_fn: Optional[MmrFn] = None) -> list[dict]:
-    """Строит все 4 шага сетки для цены входа p1 и плеча leverage."""
+               mmr_fn: Optional[MmrFn] = None,
+               lot: Optional[float] = None, fee: float = 0.0) -> list[dict]:
+    """Строит все 4 шага сетки для цены входа p1 и плеча leverage.
+
+    lot — размер одного контракта в монетах. Если он задан, шаг считается так,
+    как его исполнит биржа: из внесённой суммы вычитается комиссия за открытие,
+    остаток делится на стоимость одного контракта, дробь отбрасывается. Фактическая
+    маржа шага получается меньше запланированной, и это смещает среднюю цену,
+    а за ней и все последующие точки входа.
+
+    lot = None — идеализация дробными монетами (режим контрольных примеров ТЗ).
+    """
     p1 = float(p1)
     leverage = float(leverage)
     if p1 <= 0:
@@ -107,9 +117,24 @@ def build_grid(p1: float, leverage: float, k: float = 1.0,
                     "Цепочка ушла в отрицательные цены — плечо слишком велико."
                 )
 
-        # Множитель leverage обязателен: margin / price без плеча ломает цепочку.
-        coins = margin * leverage / price
-        cum_margin += margin
+        if lot:
+            # Стоимость одного контракта для покупателя = маржа под него + комиссия.
+            per_contract = price * lot * (1 / leverage + fee)
+            count = math.floor(margin / per_contract) if per_contract > 0 else 0
+            if count < 1:
+                raise GridError(
+                    f"Шаг {i + 1}: на {margin:g} USDT при плече {leverage:g}x "
+                    "не набирается даже один контракт."
+                )
+            coins = count * lot
+            margin_used = coins * price / leverage
+        else:
+            # Множитель leverage обязателен: margin / price без плеча ломает цепочку.
+            count = None
+            coins = margin * leverage / price
+            margin_used = margin
+
+        cum_margin += margin_used
         cum_coins += coins
         avg = leverage * cum_margin / cum_coins
         step_k = _k_for_step(leverage, k, mmr_fn, cum_coins)
@@ -118,7 +143,10 @@ def build_grid(p1: float, leverage: float, k: float = 1.0,
         rows.append({
             "step": i + 1,
             "price": price,
-            "margin": margin,
+            "margin": margin,                      # запланировано: 1, 2, 3, 4 USDT
+            "margin_used": margin_used,            # что реально уйдёт в маржу
+            "fee": coins * price * fee,
+            "contracts": count,
             "leverage": leverage,
             "coins": coins,
             "cum_coins": cum_coins,
@@ -187,6 +215,36 @@ def _max_feasible(f: Callable[[float], float], lo: float, hi: float) -> float:
         except GridError:
             bad = mid
     return good
+
+
+def solve_leverage_exchange(p1: float, target_liq: float, k: float = 1.0,
+                            mmr_fn: Optional[MmrFn] = None,
+                            max_leverage: Optional[float] = None,
+                            lot: float = 1.0, fee: float = 0.0) -> tuple[Optional[float], int]:
+    """Подбор плеча для режима с целыми контрактами.
+
+    Отбрасывание дроби делает liq[4] ступенчатой функцией плеча, поэтому
+    бисекция здесь неприменима: перебираем целые плечи и берём ближайшее
+    к цели, при равенстве — меньшее, оно безопаснее.
+    """
+    hi = int(min(float(max_leverage or LEVERAGE_MAX), LEVERAGE_MAX))
+    best, best_gap = None, None
+
+    for leverage in range(2, hi + 1):
+        try:
+            liq = build_grid(p1, leverage, k, mmr_fn, lot=lot, fee=fee)[-1]["liq"]
+        except GridError:
+            continue
+        gap = abs(liq - target_liq)
+        if best_gap is None or gap < best_gap - 1e-12:
+            best, best_gap = leverage, gap
+
+    if best is None:
+        raise GridError(
+            "Сетку не построить ни на одном плече: суммы шагов слишком малы "
+            "для минимального контракта этой пары."
+        )
+    return None, best
 
 
 def solve_leverage(p1: float, target_liq: float, k: float = 1.0,
