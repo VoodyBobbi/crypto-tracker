@@ -1,8 +1,13 @@
 """Калькулятор сетки усреднения (LONG) для фьючерсов MEXC.
 
 Одна страница: слева список USDT-фьючерсов, справа таблица расчёта.
-Запуск:  python app.py  →  http://127.0.0.1:5000
+Цены идут с биржи в постоянном режиме, таблица пересчитывается сама.
+
+Запуск:  python app.py  (или двойной щелчок по start.bat)
 """
+
+import threading
+import webbrowser
 
 from flask import Flask, jsonify, render_template, request
 
@@ -45,10 +50,30 @@ def api_pairs():
             "leverage": c["max_leverage"],
             "price": tick.get("last"),
             "change": tick.get("change"),
+            "volume": tick.get("volume"),
             "places": c["price_scale"],
             "mmr": c["mmr_base"],
         })
     return jsonify(rows)
+
+
+@app.route("/api/prices")
+def api_prices():
+    """Живые цены для видимых в списке пар. Страница опрашивает раз в 3 секунды."""
+    wanted = [mexc.normalize_symbol(x) for x in request.args.get("symbols", "").split(",")]
+    wanted = [x for x in wanted if x][:300]
+    try:
+        snap = mexc.ticker_snapshot()
+    except mexc.MexcError as exc:
+        return jsonify({"error": str(exc)}), 502
+
+    prices = {}
+    for sym in wanted:
+        tick = snap["map"].get(sym)
+        if tick:
+            prices[sym] = {"price": tick["last"], "change": tick["change"],
+                           "volume": tick["volume"]}
+    return jsonify({"ts": snap["ts"], "fresh": snap["fresh"], "prices": prices})
 
 
 @app.route("/api/grid", methods=["POST"])
@@ -174,4 +199,7 @@ def calculate(data):
 
 
 if __name__ == "__main__":
+    url = "http://127.0.0.1:5000"
+    print(f"\n  Калькулятор запущен: {url}\n  Остановить: Ctrl+C\n")
+    threading.Timer(1.2, lambda: webbrowser.open(url)).start()
     app.run(host="127.0.0.1", port=5000)

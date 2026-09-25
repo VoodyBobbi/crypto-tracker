@@ -6,7 +6,7 @@
 import math
 
 import mexc
-from grid import GridError, build_grid, solve_leverage, decimals_of
+from grid import GridError, SPEC_COEF, build_grid, solve_leverage, decimals_of
 
 TOL = 5e-4
 
@@ -20,8 +20,8 @@ def _check(name, got, expected, tol=TOL):
 
 def test_mode_b():
     """P1 = 100, L = 10, k = 1.0"""
-    print("Тест 1 (Режим Б): P1=100, L=10, k=1.0")
-    rows = build_grid(100, 10, 1.0)
+    print("Тест 1 (Режим Б): P1=100, L=10, k=1.0, коэф ТЗ 0.85")
+    rows = build_grid(100, 10, 1.0, coef=SPEC_COEF)
     expected = [
         (100.0000, 90.0000, 0.00),
         (91.5000, 84.7513, 48.13),
@@ -39,11 +39,11 @@ def test_mode_b():
 
 def test_mode_a():
     """P1 = 1.4307, Ltarget = 1.26 -> L_exact ~ 18.9223, L_final = 19"""
-    print("Тест 2 (Режим A): P1=1.4307, Ltarget=1.26")
-    exact, final = solve_leverage(1.4307, 1.26)
+    print("Тест 2 (Режим A): P1=1.4307, Ltarget=1.26, коэф ТЗ 0.85")
+    exact, final = solve_leverage(1.4307, 1.26, coef=SPEC_COEF)
     ok = _check("точное плечо", exact, 18.9223, tol=1e-3)
     ok &= _check("округлённое плечо", float(final), 19.0)
-    rows = build_grid(1.4307, final)
+    rows = build_grid(1.4307, final, coef=SPEC_COEF)
     ok &= _check("итоговая ликвидация шага 4", rows[-1]["liq"], 1.2607, tol=1e-4)
     return ok
 
@@ -184,10 +184,29 @@ def test_exchange_lots():
 def test_lots_do_not_break_ideal():
     """Без размера контракта поведение прежнее — контрольные примеры ТЗ."""
     print("Тест 13: режим без лотов не изменился")
-    rows = build_grid(100, 10)
+    rows = build_grid(100, 10, coef=SPEC_COEF)
     ok = _ok("liq[4] = 78.0879", abs(rows[-1]["liq"] - 78.0879) < 5e-4)
     ok &= _ok("contracts = None", rows[0]["contracts"] is None)
     ok &= _ok("маржа не урезана", rows[0]["margin_used"] == rows[0]["margin"])
+    return ok
+
+
+def test_entry_at_80_percent_burned():
+    """Вход — когда сгорело 80% маржи, которую можно потерять до ликвидации.
+
+    Считается от всей накопленной маржи: 1, потом 3, потом 6 USDT.
+    """
+    print("Тест 14: вход на 80% сгоревшей накопленной маржи")
+    ok = True
+    for leverage, mmr in ((20, 0.005), (60, 0.005), (100, 0.004)):
+        rows = build_grid(1000, leverage, mmr_fn=lambda c, m=mmr: m)
+        for i in range(3):
+            prev, nxt = rows[i], rows[i + 1]
+            burnable = prev["cum_coins"] * (prev["avg"] - prev["liq"])   # до ликвидации
+            burned = prev["cum_coins"] * (prev["avg"] - nxt["price"])    # в точке входа
+            ok &= _ok(f"{leverage}x, вход {i + 2}: сгорело {burned / burnable * 100:.1f}% "
+                      f"из {burnable:.2f} при марже {prev['cum_margin']:g}",
+                      abs(burned / burnable - 0.80) < 1e-9 and nxt["price"] > prev["liq"])
     return ok
 
 
@@ -206,6 +225,7 @@ if __name__ == "__main__":
         test_entries_above_liquidation(),
         test_exchange_lots(),
         test_lots_do_not_break_ideal(),
+        test_entry_at_80_percent_burned(),
     ]
     print()
     print("ВСЕ ТЕСТЫ ПРОЙДЕНЫ" if all(results) else "ЕСТЬ ПРОВАЛЕННЫЕ ТЕСТЫ")

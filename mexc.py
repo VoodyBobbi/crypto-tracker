@@ -27,8 +27,8 @@ FUNDING_URL = f"{BASE_URL}/api/v1/contract/funding_rate"
 
 CACHE_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)), ".cache")
 CACHE_FILE = os.path.join(CACHE_DIR, "mexc_contracts.json")
-CACHE_TTL = 24 * 3600      # метаданные контрактов меняются редко
-TICKER_TTL = 10            # цены живут секунды
+CACHE_TTL = 3600           # ставки маржи и лимиты: обновляем раз в час
+TICKER_TTL = 2             # цены: не чаще одного запроса в 2 секунды
 HTTP_TIMEOUT = 15
 
 _contracts: dict[str, Any] = {"ts": 0.0, "list": None}
@@ -213,27 +213,56 @@ def get_contract(symbol: str) -> Optional[dict]:
 
 
 def search(query: str, limit: int = 80) -> list[dict]:
-    """Поиск по списку USDT-фьючерсов: сначала совпадения с начала."""
+    """Поиск по USDT-фьючерсам. Порядок — по суточному обороту, как на бирже.
+
+    При поиске сначала идут пары, которые начинаются с запроса, внутри каждой
+    группы — тоже по обороту.
+    """
     items = usdt_perpetuals()
+    try:
+        ticks = all_tickers()
+    except MexcError:
+        ticks = {}
+
+    def by_volume(c):
+        return -((ticks.get(c["symbol"]) or {}).get("volume") or 0.0)
+
     q = normalize_symbol(query).replace("_USDT", "") if query else ""
-
     if not q:
-        return sorted(items, key=lambda c: (not c["is_hot"], c["symbol"]))[:limit]
+        return sorted(items, key=by_volume)[:limit]
 
-    starts = [c for c in items if c["base"].startswith(q)]
-    inside = [c for c in items if c not in starts and q in c["symbol"]]
+    starts = sorted((c for c in items if c["base"].startswith(q)), key=by_volume)
+    inside = sorted((c for c in items if not c["base"].startswith(q)
+                     and q in c["symbol"]), key=by_volume)
     return (starts + inside)[:limit]
 
 
 # --------------------------------------------------------------------------- #
 # Цены
 # --------------------------------------------------------------------------- #
-def all_tickers() -> dict[str, dict]:
-    """Цены по всем контрактам одним запросом. Кэш на несколько секунд."""
+def ticker_snapshot() -> dict:
+    """Цены по всем контрактам одним запросом: {map, ts, fresh}.
+
+    Если биржа не ответила — отдаёт последние известные цены с fresh=False,
+    чтобы страница не пустела от одного пропущенного запроса.
+    """
     now = time.time()
     if _tickers["map"] and now - _tickers["ts"] < TICKER_TTL:
-        return _tickers["map"]
+        return {"map": _tickers["map"], "ts": _tickers["ts"], "fresh": True}
+    try:
+        _fetch_tickers(now)
+        return {"map": _tickers["map"], "ts": _tickers["ts"], "fresh": True}
+    except MexcError:
+        if _tickers["map"]:
+            return {"map": _tickers["map"], "ts": _tickers["ts"], "fresh": False}
+        raise
 
+
+def all_tickers() -> dict[str, dict]:
+    return ticker_snapshot()["map"]
+
+
+def _fetch_tickers(now: float) -> None:
     data = _get(TICKER_URL)
     if isinstance(data, dict):
         data = [data]
@@ -245,9 +274,10 @@ def all_tickers() -> dict[str, dict]:
         result[sym] = {
             "last": _num(_pick(item, "lastPrice", "last"), 0.0),
             "change": (_num(_pick(item, "riseFallRate"), 0.0) or 0.0) * 100,
+            # Оборот за сутки в USDT — по нему список сортируется, как на бирже.
+            "volume": _num(_pick(item, "amount24", "turnover24"), 0.0) or 0.0,
         }
     _tickers.update(ts=now, map=result)
-    return result
 
 
 def get_price(symbol: str) -> Optional[float]:

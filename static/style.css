@@ -98,7 +98,9 @@ body {
   vertical-align: middle;
   margin-right: 7px;
 }
-.name { display: inline-flex; align-items: baseline; gap: 5px; }
+.name { display: inline-grid; vertical-align: middle; }
+.name-top { display: inline-flex; align-items: baseline; gap: 5px; }
+.vol { font-size: 0.72rem; color: var(--grey); }
 .name b { font-size: 0.95rem; }
 .usdt { color: var(--grey); font-size: 0.78rem; }
 .lev-badge {
@@ -250,4 +252,48 @@ h1 { margin: 2px 0 16px; font-size: 1.7rem; font-weight: 900; }
   .steps td:nth-child(5) { border-right: var(--line); border-radius: 0 13px 13px 0; }
   .sub { font-size: 0.66rem; }
   .ball.step { width: 24px; height: 24px; font-size: 0.75rem; }
+}
+
+/* ------------------------------ живой режим ------------------------------ */
+.status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+  font-size: 0.78rem;
+  color: var(--grey);
+}
+.status i {
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: var(--grey);
+  flex: none;
+}
+.status.ok i { background: var(--green); animation: pulse 2s ease-in-out infinite; }
+.status.bad { color: var(--red); }
+.status.bad i { background: var(--red); }
+
+@keyframes pulse { 50% { opacity: 0.35; } }
+
+.flash-up { animation: flash-up 0.9s ease-out; }
+.flash-dn { animation: flash-dn 0.9s ease-out; }
+@keyframes flash-up { from { background: #c9f5e2; } to { background: transparent; } }
+@keyframes flash-dn { from { background: #ffd6da; } to { background: transparent; } }
+.price { border-radius: 6px; padding: 0 3px; }
+
+.field-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.live {
+  padding: 2px 9px;
+  border: 2px solid var(--ink);
+  border-radius: 9px;
+  background: var(--white);
+  color: var(--grey);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.live.is-on { background: #c9f5e2; color: var(--green); }
+
+@media (prefers-reduced-motion: reduce) {
+  .status.ok i, .flash-up, .flash-dn { animation: none; }
 }

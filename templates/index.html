@@ -18,9 +18,10 @@
   <aside class="card pairs">
     <input id="search" class="search" type="search" placeholder="Поиск монеты…"
            autocomplete="off" spellcheck="false" />
+    <div class="status" id="status"><i></i><span>Подключаюсь к MEXC…</span></div>
     <table class="pair-table">
       <thead>
-        <tr><th>Пара</th><th class="right">Цена</th></tr>
+        <tr><th>Пара / Объём</th><th class="right">Цена</th></tr>
       </thead>
       <tbody id="pair-rows">
         <tr><td colspan="2" class="muted">Загружаю пары…</td></tr>
@@ -37,7 +38,10 @@
 
       <form id="form" autocomplete="off">
         <label class="field">
-          <span>Первый вход по цене</span>
+          <span class="field-head">
+            Первый вход по цене
+            <button type="button" id="live" class="live is-on">● по рынку</button>
+          </span>
           <input id="p1" inputmode="decimal" placeholder="—" />
         </label>
 

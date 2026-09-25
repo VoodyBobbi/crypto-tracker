@@ -19,7 +19,12 @@ from typing import Callable, Optional
 # Константы (п. 1.2 ТЗ)
 # --------------------------------------------------------------------------- #
 MARGINS = (1.0, 2.0, 3.0, 4.0)   # маржа по шагам, сумма = 10 USDT
-ENTRY_COEF = 0.85                # вход на 85% пути от средней до ликвидации
+# Следующий вход — когда сгорело 80% той маржи, что может сгореть до ликвидации.
+# Убыток в точке входа = ENTRY_COEF × (убыток в точке ликвидации), считается от
+# всей накопленной маржи: 1, потом 3, потом 6 USDT. Коэффициент < 1, поэтому
+# вход всегда наступает раньше ликвидации — на любом плече и при любом MMR.
+ENTRY_COEF = 0.80
+SPEC_COEF = 0.85                 # коэффициент исходного ТЗ, на нём контрольные примеры
 STEPS = len(MARGINS)
 
 LEVERAGE_MIN = 1.5               # нижняя граница интервала поиска плеча
@@ -82,7 +87,8 @@ def _k_for_step(leverage: float, k_const: float, mmr_fn: Optional[MmrFn],
 # --------------------------------------------------------------------------- #
 def build_grid(p1: float, leverage: float, k: float = 1.0,
                mmr_fn: Optional[MmrFn] = None,
-               lot: Optional[float] = None, fee: float = 0.0) -> list[dict]:
+               lot: Optional[float] = None, fee: float = 0.0,
+               coef: Optional[float] = None) -> list[dict]:
     """Строит все 4 шага сетки для цены входа p1 и плеча leverage.
 
     lot — размер одного контракта в монетах. Если он задан, шаг считается так,
@@ -102,6 +108,10 @@ def build_grid(p1: float, leverage: float, k: float = 1.0,
     if not 0 < k <= 1:
         raise GridError("k должно лежать в диапазоне (0, 1].")
 
+    coef = ENTRY_COEF if coef is None else float(coef)
+    if not 0 < coef < 1:
+        raise GridError("Доля сгоревшей маржи для входа должна быть между 0 и 100%.")
+
     rows: list[dict] = []
     cum_margin = 0.0
     cum_coins = 0.0
@@ -111,7 +121,7 @@ def build_grid(p1: float, leverage: float, k: float = 1.0,
         if i > 0:
             prev = rows[-1]
             # Вход на 85% пути от средней цены до ликвидации предыдущего шага.
-            price = prev["avg"] - ENTRY_COEF * (prev["avg"] - prev["liq"])
+            price = prev["avg"] - coef * (prev["avg"] - prev["liq"])
             if price <= 0:
                 raise GridError(
                     "Цепочка ушла в отрицательные цены — плечо слишком велико."
@@ -170,9 +180,10 @@ def build_grid(p1: float, leverage: float, k: float = 1.0,
 # Подбор плеча (Режим A, п. 1.5 ТЗ)
 # --------------------------------------------------------------------------- #
 def _residual(p1: float, target_liq: float, k: float,
-              mmr_fn: Optional[MmrFn]) -> Callable[[float], float]:
+              mmr_fn: Optional[MmrFn],
+              coef: Optional[float] = None) -> Callable[[float], float]:
     def f(leverage: float) -> float:
-        return build_grid(p1, leverage, k, mmr_fn)[-1]["liq"] - target_liq
+        return build_grid(p1, leverage, k, mmr_fn, coef=coef)[-1]["liq"] - target_liq
     return f
 
 
@@ -220,7 +231,8 @@ def _max_feasible(f: Callable[[float], float], lo: float, hi: float) -> float:
 def solve_leverage_exchange(p1: float, target_liq: float, k: float = 1.0,
                             mmr_fn: Optional[MmrFn] = None,
                             max_leverage: Optional[float] = None,
-                            lot: float = 1.0, fee: float = 0.0) -> tuple[Optional[float], int]:
+                            lot: float = 1.0, fee: float = 0.0,
+                            coef: Optional[float] = None) -> tuple[Optional[float], int]:
     """Подбор плеча для режима с целыми контрактами.
 
     Отбрасывание дроби делает liq[4] ступенчатой функцией плеча, поэтому
@@ -232,7 +244,8 @@ def solve_leverage_exchange(p1: float, target_liq: float, k: float = 1.0,
 
     for leverage in range(2, hi + 1):
         try:
-            liq = build_grid(p1, leverage, k, mmr_fn, lot=lot, fee=fee)[-1]["liq"]
+            liq = build_grid(p1, leverage, k, mmr_fn, lot=lot, fee=fee,
+                             coef=coef)[-1]["liq"]
         except GridError:
             continue
         gap = abs(liq - target_liq)
@@ -249,7 +262,8 @@ def solve_leverage_exchange(p1: float, target_liq: float, k: float = 1.0,
 
 def solve_leverage(p1: float, target_liq: float, k: float = 1.0,
                    mmr_fn: Optional[MmrFn] = None,
-                   max_leverage: Optional[float] = None) -> tuple[float, int]:
+                   max_leverage: Optional[float] = None,
+                   coef: Optional[float] = None) -> tuple[float, int]:
     """Подбирает плечо так, чтобы ликвидация шага 4 попала в target_liq.
 
     Возвращает (точное плечо, округлённое до целого). Итоговая ликвидация
@@ -267,7 +281,7 @@ def solve_leverage(p1: float, target_liq: float, k: float = 1.0,
     if hi <= LEVERAGE_MIN:
         raise GridError("Максимальное плечо контракта слишком мало для расчёта.")
 
-    f = _residual(p1, target_liq, k, mmr_fn)
+    f = _residual(p1, target_liq, k, mmr_fn, coef)
 
     # MMR ограничивает плечо сверху жёстче, чем лимит контракта: при MMR * L >= 1
     # позиция невозможна. Ищем наибольшее плечо, на котором сетка ещё строится.
