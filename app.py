@@ -133,6 +133,12 @@ def calculate(data):
             raise GridError(f"На этой паре плечо максимум {max_lev:g}x.")
     else:
         target = _number(data.get("target_liq"))
+        # Проверка до подбора: перебор целых плеч сам её не делает и нарисовал бы
+        # таблицу под бессмысленную цель.
+        if target <= 0:
+            raise GridError("Целевая ликвидация должна быть больше нуля.")
+        if target >= p1:
+            raise GridError("Целевая ликвидация должна быть ниже цены входа (LONG).")
         if lot:
             _, leverage = solve_leverage_exchange(
                 p1, target, mmr_fn=mmr_fn, max_leverage=max_lev, lot=lot, fee=fee)

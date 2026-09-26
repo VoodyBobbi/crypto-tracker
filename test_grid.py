@@ -210,6 +210,31 @@ def test_entry_at_80_percent_burned():
     return ok
 
 
+def test_target_sanity():
+    """Цель выше цены входа или не больше нуля — ошибка в обоих режимах."""
+    print("Тест 15: бессмысленная цель ликвидации отклоняется")
+    import time
+    import app as appmod
+    raw = {"symbol": "T_USDT", "baseCoin": "T", "quoteCoin": "USDT", "contractSize": 0.01,
+           "maxLeverage": 100, "priceScale": 2, "priceUnit": 0.01, "takerFeeRate": 0.0006,
+           "maintenanceMarginRate": 0.004}
+    saved = mexc.load_contracts
+    mexc.load_contracts = lambda force=False: ([mexc.normalize(raw)], time.time(), True)
+    ok = True
+    try:
+        for symbol in ("T_USDT", ""):
+            for target in ("120", "100", "0", "-5"):
+                try:
+                    appmod.calculate({"symbol": symbol, "p1": "100", "mode": "target",
+                                      "target_liq": target})
+                    ok &= _ok(f"{'с парой' if symbol else 'без пары'}, цель {target}", False)
+                except GridError:
+                    ok &= _ok(f"{'с парой' if symbol else 'без пары'}, цель {target} -> ошибка", True)
+    finally:
+        mexc.load_contracts = saved
+    return ok
+
+
 if __name__ == "__main__":
     results = [
         test_mode_b(),
@@ -226,6 +251,7 @@ if __name__ == "__main__":
         test_exchange_lots(),
         test_lots_do_not_break_ideal(),
         test_entry_at_80_percent_burned(),
+        test_target_sanity(),
     ]
     print()
     print("ВСЕ ТЕСТЫ ПРОЙДЕНЫ" if all(results) else "ЕСТЬ ПРОВАЛЕННЫЕ ТЕСТЫ")
