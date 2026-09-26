@@ -1,0 +1,12 @@
+# Render Blueprint: New -> Blueprint -> выбрать этот репозиторий. Всё остальное отсюда.
+services:
+  - type: web
+    name: setka-mexc
+    runtime: docker
+    plan: free
+    # MEXC советует доступ к API из Японии или Сингапура — из других регионов
+    # их файрвол может отвечать 403.
+    region: singapore
+    branch: main
+    autoDeploy: true
+    healthCheckPath: /

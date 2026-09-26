@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Сетка усреднения — MEXC</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;800;900&display=swap"
+        rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+
+<div class="page">
+
+  <!-- Список пар -->
+  <aside class="card pairs">
+    <input id="search" class="search" type="search" placeholder="Поиск монеты…"
+           autocomplete="off" spellcheck="false" />
+    <div class="status" id="status"><i></i><span>Подключаюсь к MEXC…</span></div>
+    <table class="pair-table">
+      <thead>
+        <tr><th>Пара / Объём</th><th class="right">Цена</th></tr>
+      </thead>
+      <tbody id="pair-rows">
+        <tr><td colspan="2" class="muted">Загружаю пары…</td></tr>
+      </tbody>
+    </table>
+  </aside>
+
+  <!-- Расчёт -->
+  <main class="card calc">
+    <div id="empty" class="empty">← Выбери пару слева</div>
+
+    <div id="panel" hidden>
+      <h1 id="title">—</h1>
+
+      <form id="form" autocomplete="off">
+        <label class="field">
+          <span class="field-head">
+            Первый вход по цене
+            <button type="button" id="live" class="live is-on">● по рынку</button>
+          </span>
+          <input id="p1" inputmode="decimal" placeholder="—" />
+        </label>
+
+        <div class="tabs">
+          <button type="button" class="tab is-on" data-mode="target">Цель ликвидации</button>
+          <button type="button" class="tab" data-mode="leverage">Задать плечо</button>
+        </div>
+
+        <label class="field" id="box-target">
+          <span>Ликвидация 4-го шага ≈</span>
+          <input id="target" inputmode="decimal" placeholder="например 1.26" />
+        </label>
+
+        <label class="field" id="box-leverage" hidden>
+          <span>Плечо</span>
+          <input id="leverage" inputmode="numeric" placeholder="например 20" />
+        </label>
+
+        <button class="go" type="submit">Посчитать</button>
+      </form>
+
+      <p id="error" class="oops" hidden></p>
+
+      <div id="result" hidden>
+        <div class="head">
+          <span class="lev">Плечо <b id="lev">—</b></span>
+          <span class="mmr" id="mmr">—</span>
+        </div>
+
+        <table class="steps">
+          <thead>
+            <tr>
+              <th>Шаг</th>
+              <th class="right">Вход</th>
+              <th class="right">Вкладываю</th>
+              <th class="right">Количество</th>
+              <th class="right">Ликвидация</th>
+              <th class="right">% пути</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+
+        <div id="notes"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
