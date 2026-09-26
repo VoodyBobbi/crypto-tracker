@@ -1,0 +1,29 @@
+# Временные файлы сборки PyInstaller
+build/
+dist/
+
+# Кэш PyInstaller
+*.pyc
+__pycache__/
+*.pyo
+*.egg-info/
+
+# Файлы, создаваемые при сборке
+*.spec
+!app.spec
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Временные файлы Windows
+*.tmp
+*.log
+
+# release/ папка может быть большая
+# release/
+
