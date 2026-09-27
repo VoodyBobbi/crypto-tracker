@@ -1,6 +1,55 @@
 __pycache__/
+
+# Byte-compiled / cached files
+*.py[cod]
+*$py.class
 *.pyc
+
+# Virtual environments
 .venv/
 venv/
+env/
+ENV/
+
+# IDEs and editors
 .idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# PyInstaller / build artifacts
+build/
+dist/
+*.spec
+desktop_app/build/
+desktop_app/dist/
+exe_build/build/
+exe_build/dist/
+release/
+
+# Packaging
+*.egg-info/
+pip-wheel-metadata/
+
+# Logs and temp files
+*.log
+*.tmp
+*.bak
+
+# Test / coverage
+.pytest_cache/
+.coverage
+coverage.xml
+nosetests.xml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.envrc
 .cache/
+*.exe
+build/
+dist/
