@@ -129,6 +129,10 @@ body {
 h1 { margin: 2px 0 16px; font-size: 1.7rem; font-weight: 900; }
 
 #form { display: grid; gap: 14px; }
+.advanced { border-top: 2px solid #eceaf2; padding-top: 12px; }
+.advanced summary { cursor: pointer; color: var(--grey); font-size: 0.9rem; }
+.advanced-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+.advanced .field input { font-size: 1rem; }
 .field { display: grid; gap: 5px; }
 .field > span { font-size: 0.9rem; }
 .field input {
@@ -206,7 +210,8 @@ h1 { margin: 2px 0 16px; font-size: 1.7rem; font-weight: 900; }
   background: #ffe1e4;
 }
 
-.steps { width: 100%; border-collapse: separate; border-spacing: 0 8px; }
+.table-wrap { overflow-x: auto; }
+.steps { width: 100%; min-width: 610px; border-collapse: separate; border-spacing: 0 8px; }
 .steps th { padding: 0 8px; font-size: 0.78rem; color: var(--grey); text-align: left; }
 .steps th.right { text-align: right; }
 .steps td {
@@ -248,8 +253,7 @@ h1 { margin: 2px 0 16px; font-size: 1.7rem; font-weight: 900; }
   .steps td { padding: 9px 5px; font-size: 0.9rem; }
   .steps th { padding: 0 5px; font-size: 0.66rem; }
   /* На узком экране «% пути» уступает место количеству: без него ордер не поставить. */
-  .steps th:nth-child(6), .steps td:nth-child(6) { display: none; }
-  .steps td:nth-child(5) { border-right: var(--line); border-radius: 0 13px 13px 0; }
+  .advanced-grid { grid-template-columns: 1fr; }
   .sub { font-size: 0.66rem; }
   .ball.step { width: 24px; height: 24px; font-size: 0.75rem; }
 }

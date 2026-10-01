@@ -1,35 +1,39 @@
 @echo off
-chcp 65001 >nul
+setlocal
 cd /d "%~dp0"
+chcp 65001 >nul
 title Калькулятор сетки MEXC
-set FIRST=
 
-if exist ".venv\Scripts\python.exe" goto deps
+if exist ".venv\Scripts\python.exe" (
+  ".venv\Scripts\python.exe" -c "import sys" >nul 2>nul
+  if not errorlevel 1 goto deps
+)
 
-echo Первый запуск: готовлю окружение, это минута...
-python -m venv .venv 2>nul
-if not exist ".venv\Scripts\python.exe" py -3 -m venv .venv 2>nul
-if not exist ".venv\Scripts\python.exe" goto nopython
-set FIRST=1
+where py >nul 2>nul
+if not errorlevel 1 (
+  py -3 --version >nul 2>nul
+  if errorlevel 1 goto no_python
+  py -3 -m venv --clear .venv
+) else (
+  where python >nul 2>nul
+  if errorlevel 1 goto no_python
+  python --version >nul 2>nul
+  if errorlevel 1 goto no_python
+  python -m venv --clear .venv
+)
+if errorlevel 1 goto setup_error
 
 :deps
-rem Каждый запуск сверяет библиотеки: если проект обновился, доставит новое.
 ".venv\Scripts\python.exe" -m pip install --disable-pip-version-check -q -r requirements.txt
-if errorlevel 1 if defined FIRST goto nopip
-
+if errorlevel 1 goto setup_error
 ".venv\Scripts\python.exe" app.py
+goto :eof
+
+:setup_error
+echo Не удалось подготовить Python. Установите Python 3.10+ и проверьте подключение к интернету.
 pause
 goto :eof
 
-:nopython
-echo.
-echo Python не найден.
-echo Скачайте с python.org и при установке отметьте "Add python.exe to PATH".
-pause
-goto :eof
-
-:nopip
-echo.
-echo Не удалось установить библиотеки. Проверьте интернет и запустите снова.
-rmdir /s /q .venv
+:no_python
+echo Python 3.10+ не найден. Установите Python с python.org, затем запустите start.bat снова.
 pause
