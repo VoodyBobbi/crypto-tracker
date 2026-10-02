@@ -1,26 +1,27 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-chcp 65001 >nul
-title Калькулятор сетки MEXC
+title MEXC Grid Calculator
 
-if exist ".venv\Scripts\python.exe" (
-  ".venv\Scripts\python.exe" -c "import sys" >nul 2>nul
-  if not errorlevel 1 goto deps
-)
+if not exist ".venv\Scripts\python.exe" goto make_venv
+".venv\Scripts\python.exe" -c "import sys" >nul 2>nul
+if not errorlevel 1 goto deps
 
+:make_venv
 where py >nul 2>nul
-if not errorlevel 1 (
-  py -3 --version >nul 2>nul
-  if errorlevel 1 goto no_python
-  py -3 -m venv --clear .venv
-) else (
-  where python >nul 2>nul
-  if errorlevel 1 goto no_python
-  python --version >nul 2>nul
-  if errorlevel 1 goto no_python
-  python -m venv --clear .venv
-)
+if errorlevel 1 goto try_python
+py -3 --version >nul 2>nul
+if errorlevel 1 goto try_python
+py -3 -m venv --clear .venv
+if errorlevel 1 goto setup_error
+goto deps
+
+:try_python
+where python >nul 2>nul
+if errorlevel 1 goto no_python
+python --version >nul 2>nul
+if errorlevel 1 goto no_python
+python -m venv --clear .venv
 if errorlevel 1 goto setup_error
 
 :deps
@@ -30,10 +31,10 @@ if errorlevel 1 goto setup_error
 goto :eof
 
 :setup_error
-echo Не удалось подготовить Python. Установите Python 3.10+ и проверьте подключение к интернету.
+echo Could not prepare Python or install dependencies.
 pause
 goto :eof
 
 :no_python
-echo Python 3.10+ не найден. Установите Python с python.org, затем запустите start.bat снова.
+echo Python 3.10 or newer was not found. Install Python, then run start.bat again.
 pause

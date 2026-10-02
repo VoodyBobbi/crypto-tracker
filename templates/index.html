@@ -22,33 +22,29 @@
       <h1 id="title">Пара</h1>
       <form id="form" autocomplete="off">
         <label class="field"><span class="field-head">Цена первого входа
-          <button type="button" id="live" class="live is-on">● по рынку</button></span>
-          <input id="p1" inputmode="decimal" placeholder="Текущая цена MEXC"></label>
+          <button type="button" id="live" class="live is-on">● fair price MEXC</button></span>
+          <input id="p1" inputmode="decimal" placeholder="Текущая fair price MEXC"></label>
         <div class="tabs">
           <button type="button" class="tab" data-mode="target">Задать цель ликвидации</button>
           <button type="button" class="tab is-on" data-mode="leverage">Задать плечо</button>
         </div>
         <label class="field" id="box-target" hidden><span>Целевая ликвидация после шага 4</span>
           <input id="target" inputmode="decimal" placeholder="Например, 1.26"></label>
-        <label class="field" id="box-leverage"><span>Плечо, целое число</span>
-          <input id="leverage" inputmode="numeric" value="10" placeholder="Например, 20"></label>
-        <details class="advanced"><summary>Дополнительные параметры</summary>
-          <div class="advanced-grid">
-            <label class="field"><span>MMR, % (пусто = 0%)</span><input id="mmr" inputmode="decimal" placeholder="MMR"></label>
-            <label class="field"><span>Ликвидация шага 1 для калибровки</span><input id="liq1" inputmode="decimal" placeholder="Ликв. 1"></label>
-            <label class="field"><span>Фандинг, % за списание</span><input id="funding" inputmode="decimal" value="0"></label>
-            <label class="field"><span>Число списаний фандинга</span><input id="funding-count" inputmode="numeric" value="0"></label>
-          </div>
-        </details>
+        <label class="field" id="box-leverage"><span>Плечо (по умолчанию из MEXC)</span>
+          <input id="leverage" inputmode="numeric" placeholder="Загружается из аккаунта"></label>
+        <label class="field"><span>Срок до шага 4, часов</span>
+          <input id="hours" inputmode="decimal" type="number" min="0" max="720" step="1" value="24"></label>
         <button class="go" type="submit">Рассчитать сетку</button>
       </form>
+      <div id="exchange-info" class="status bad">Нужен API-ключ MEXC только для чтения.</div>
       <p id="error" class="oops" hidden></p>
       <div id="result" hidden>
         <div class="head"><span class="lev">Плечо <b id="lev">—</b></span><span class="mmr" id="mmr-label">—</span></div>
         <div class="table-wrap"><table class="steps">
-          <thead><tr><th>Шаг</th><th class="right">Цена входа</th><th class="right">Маржа USDT</th><th class="right">Плечо</th><th class="right">Ликвидация</th><th class="right">% пути</th></tr></thead>
+          <thead><tr><th>Шаг</th><th class="right">Вход fair price</th><th class="right">Маржа USDT</th><th class="right">Контракты</th><th class="right">Номинал USDT</th><th class="right">Ликвидация</th><th class="right">MMR</th></tr></thead>
           <tbody id="rows"></tbody>
         </table></div>
+        <p class="muted" id="estimate-note">Оценка по текущим параметрам MEXC; реальные условия могут измениться.</p>
       </div>
     </div>
   </main>
