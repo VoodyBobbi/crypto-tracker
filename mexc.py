@@ -1,9 +1,10 @@
-"""Read-only client for public MEXC futures data and private account data."""
+"""MEXC Futures market data, private account, and order API client."""
 
 from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import os
 import time
 from typing import Any
@@ -56,21 +57,30 @@ def normalize_symbol(value: str) -> str:
     return (text[:-4] + "_USDT") if text.endswith("USDT") else text + "_USDT"
 
 
-def _request(path: str, *, params: dict | None = None, private: bool = False) -> Any:
+def _request(path: str, *, params: dict | None = None, private: bool = False,
+             method: str = "GET", body: Any = None) -> Any:
     _load_dotenv()
+    method = method.upper()
+    if method not in {"GET", "POST", "DELETE"}:
+        raise MexcError("Неподдерживаемый метод запроса к MEXC.")
     params = {key: value for key, value in (params or {}).items() if value is not None}
     headers = {"Language": "en-US"}
     request_params = sorted(params.items())
+    body_text = json.dumps(body, separators=(",", ":"), ensure_ascii=False) if body is not None else ""
+    if method != "GET":
+        headers["Content-Type"] = "application/json"
     if private:
         api_key = os.getenv("MEXC_API_KEY", "")
         api_secret = os.getenv("MEXC_API_SECRET", "")
         if not api_key or not api_secret:
             raise MexcError(
                 "Для расчёта с данными аккаунта укажите MEXC_API_KEY и "
-                "MEXC_API_SECRET в локальном файле .env. Нужен ключ только для чтения."
+                "MEXC_API_SECRET в локальном файле .env. Для запуска сетки ключу "
+                "также потребуется право Order Placing."
             )
         timestamp = str(int(time.time() * 1000))
-        param_string = "&".join(f"{key}={value}" for key, value in request_params)
+        param_string = ("&".join(f"{key}={value}" for key, value in request_params)
+                        if method == "GET" else body_text)
         message = f"{api_key}{timestamp}{param_string}".encode("utf-8")
         signature = hmac.new(api_secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
         headers.update({
@@ -80,9 +90,15 @@ def _request(path: str, *, params: dict | None = None, private: bool = False) ->
         })
 
     try:
-        response = requests.get(
-            BASE_URL + path, params=request_params, headers=headers, timeout=HTTP_TIMEOUT
-        )
+        if method == "GET":
+            response = requests.get(
+                BASE_URL + path, params=request_params, headers=headers, timeout=HTTP_TIMEOUT
+            )
+        else:
+            response = requests.request(
+                method, BASE_URL + path, params=request_params or None,
+                data=body_text or None, headers=headers, timeout=HTTP_TIMEOUT
+            )
         response.raise_for_status()
         payload = response.json()
     except (requests.RequestException, ValueError) as exc:
@@ -187,6 +203,58 @@ def search(query: str, limit: int = 120) -> list[dict]:
 
 def _private_get(path: str, params: dict | None = None) -> Any:
     return _request(path, params=params, private=True)
+
+
+def _private_post(path: str, body: Any) -> Any:
+    return _request(path, private=True, method="POST", body=body)
+
+
+def best_ask(symbol: str) -> float:
+    symbol = normalize_symbol(symbol)
+    book = _request(f"/api/v1/contract/depth/{symbol}", params={"limit": 5})
+    asks = book.get("asks") if isinstance(book, dict) else None
+    if not isinstance(asks, list) or not asks:
+        raise MexcError("MEXC не вернула стакан заявок для этой пары.")
+    prices = []
+    for row in asks:
+        value = row.get("price") if isinstance(row, dict) else (row[0] if row else None)
+        price = _number(value)
+        if price is not None and price > 0:
+            prices.append(price)
+    if not prices:
+        raise MexcError("В стакане MEXC отсутствует корректная цена продажи.")
+    return min(prices)
+
+
+def position_mode() -> int:
+    value = _private_get("/api/v1/private/position/position_mode")
+    if isinstance(value, dict):
+        value = value.get("positionMode", value.get("mode"))
+    try:
+        mode = int(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise MexcError("MEXC не вернула режим позиции аккаунта.") from exc
+    if mode not in (1, 2):
+        raise MexcError("MEXC вернула неизвестный режим позиции.")
+    return mode
+
+
+def place_order(order: dict) -> Any:
+    return _private_post("/api/v1/private/order/create", order)
+
+
+def order_by_id(order_id: str) -> Any:
+    return _private_get(f"/api/v1/private/order/get/{order_id}")
+
+
+def order_by_external(symbol: str, external_oid: str) -> Any:
+    symbol = normalize_symbol(symbol)
+    return _private_get(f"/api/v1/private/order/external/{symbol}/{external_oid}")
+
+
+def cancel_orders(order_ids: list[str]) -> Any:
+    ids = [int(order_id) for order_id in order_ids]
+    return _private_post("/api/v1/private/order/cancel", {"orderIds": ids})
 
 
 def _rows(payload: Any, name: str) -> list[dict]:

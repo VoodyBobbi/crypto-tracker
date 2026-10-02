@@ -176,6 +176,17 @@ h1 { margin: 2px 0 16px; font-size: 1.7rem; font-weight: 900; }
   transition: transform 0.08s ease, box-shadow 0.08s ease;
 }
 .go:active { transform: translate(4px, 4px); box-shadow: 1px 1px 0 var(--ink); }
+.launch { display: block; margin-top: 16px; background: var(--yellow); }
+.launch:disabled { opacity: 0.6; cursor: wait; }
+.launch-status {
+  white-space: pre-wrap;
+  margin: 12px 0;
+  padding: 11px 14px;
+  border: var(--line);
+  border-radius: 13px;
+}
+.launch-status.ok { background: #dcfaec; }
+.launch-status.bad { background: #ffe1e4; }
 
 .oops {
   margin: 14px 0 0;

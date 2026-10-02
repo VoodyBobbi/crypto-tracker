@@ -7,6 +7,10 @@ import time
 
 MARGINS = (1.0, 2.0, 3.0, 4.0)
 ENTRY_COEF = 0.85
+GRID_BUDGET = 10.0
+API_MAKER_FEE_FLOOR = 0.0006
+API_TAKER_FEE_FLOOR = 0.0008
+MARGIN_SCALE_STEP = 0.002
 
 
 class GridError(ValueError):
@@ -183,9 +187,13 @@ def _fee_rate(context: dict) -> float:
     collect(context.get("fee") or {})
     collect(context.get("contract") or {})
     if not found:
-        found.append(_num(context["contract"].get("takerFeeRate"), "takerFeeRate"))
+        fallback = context["contract"].get("takerFeeRate")
+        if fallback is not None:
+            found.append(_num(fallback, "takerFeeRate"))
     # The highest current maker/taker/tier rate is used as a conservative estimate.
-    return max(found)
+    # MEXC's published Futures API taker rate is 0.08%; account-specific
+    # exchange data can raise this conservative floor.
+    return max(max(found), API_TAKER_FEE_FLOOR)
 
 
 def _funding_events(funding: dict, hours: float) -> int:
@@ -229,7 +237,8 @@ def _leverage_settings(context: dict, target_positions: list[dict]) -> tuple[int
             raise GridError("MEXC не вернула настройки плеча для режима открытой позиции.")
         configured = matching[0]
     else:
-        configured = longs[0]
+        isolated = [row for row in longs if _int(row.get("openType"), "openType") == 1]
+        configured = (isolated or longs)[0]
         open_type = _int(configured.get("openType"), "openType")
     if open_type not in (1, 2):
         raise GridError("MEXC вернула неизвестный режим маржи.")
@@ -310,7 +319,8 @@ def _asset_usdt(context: dict) -> dict:
 
 def _calculate_for_leverage(context: dict, p1: float, leverage: int,
                             hours: float, opened_mode: int,
-                            target_positions: list[dict]) -> dict:
+                            target_positions: list[dict],
+                            margin_scale: float = 1.0) -> dict:
     contract = context["contract"]
     symbol = context["symbol"]
     fair_price = _num(context.get("fair_price"), "fairPrice")
@@ -319,7 +329,7 @@ def _calculate_for_leverage(context: dict, p1: float, leverage: int,
     funding = context.get("funding") or {}
     _check_market_freshness(context, funding)
     funding_rate = _adverse_funding_rate(funding, 1)
-    funding_events = _funding_events(funding, hours)
+    funding_events = _funding_events(funding, hours) + (1 if hours > 0 else 0)
     fee_rate = _fee_rate(context)
     liquidation_fee_rate = _num(contract.get("liquidationFeeRate"), "liquidationFeeRate")
     contract_size = _num(contract.get("contractSize"), "contractSize")
@@ -438,7 +448,7 @@ def _calculate_for_leverage(context: dict, p1: float, leverage: int,
                 raise GridError(f"Нет ставки фандинга для открытой позиции {other_symbol}.")
             side = _int(row.get("positionType"), "position.positionType")
             adverse_rate = _adverse_funding_rate(other_funding, side)
-            other_events = _funding_events(other_funding, hours)
+            other_events = _funding_events(other_funding, hours) + (1 if hours > 0 else 0)
             market_fair = _num(other_funding.get("fairPrice"), f"{other_symbol}.fairPrice")
             other_notional = max(entry_value, market_fair * quantity)
             other_future_funding += adverse_rate * other_notional * other_events
@@ -454,7 +464,8 @@ def _calculate_for_leverage(context: dict, p1: float, leverage: int,
     total_new_entry_value = 0.0
     price = p1
 
-    for step, margin in enumerate(MARGINS, 1):
+    for step, weight in enumerate(MARGINS, 1):
+        margin = MARGINS[0] if step == 1 else weight * margin_scale
         if price_unit > 0:
             price = math.floor(price / price_unit + 1e-10) * price_unit
             if rows and price <= rows[-1]["liq"]:
@@ -521,7 +532,6 @@ def _calculate_for_leverage(context: dict, p1: float, leverage: int,
             if denominator <= 0:
                 raise GridError("Не удалось рассчитать цену ликвидации по данным MEXC.")
             liquidation = numerator / denominator
-            current_margin_cost = total_new_margin + total_entry_fees
         else:
             # Forecast funding and entry fees reduce shared cross-margin equity.
             target_net_quantity = all_long_quantity - short_quantity
@@ -536,12 +546,9 @@ def _calculate_for_leverage(context: dict, p1: float, leverage: int,
                     "При текущих встречных позициях нельзя получить надёжную оценку LONG-ликвидации."
                 )
             liquidation = numerator / denominator
-            current_margin_cost = total_new_margin + total_entry_fees
 
         if not math.isfinite(liquidation):
             raise GridError("MEXC вернула данные, по которым нельзя рассчитать ликвидацию.")
-        if current_margin_cost > cash_available + 1e-9:
-            raise GridError("Недостаточно доступного баланса MEXC для четырёх шагов сетки.")
 
         average = all_long_entry / all_long_quantity
         rows.append({
@@ -575,6 +582,10 @@ def _calculate_for_leverage(context: dict, p1: float, leverage: int,
     if rows[-1]["price"] <= rows[-2]["liq"]:
         raise GridError("Цена входа шага 4 не выше расчётной ликвидации шага 3.")
 
+    budget_margin = sum(row["actual_margin"] for row in rows)
+    budget_entry_fees = sum(row["fee"] for row in rows)
+    budget_funding = rows[-1]["funding"]
+    budget_required = budget_margin + budget_entry_fees + budget_funding
     return {
         "leverage": leverage,
         "open_type": opened_mode,
@@ -589,6 +600,12 @@ def _calculate_for_leverage(context: dict, p1: float, leverage: int,
         "liquidation_fee_rate": liquidation_fee_rate,
         "mmr": rows[-1]["mmr"],
         "account_available": cash_available,
+        "budget_limit": GRID_BUDGET,
+        "budget_margin": budget_margin,
+        "budget_entry_fees": budget_entry_fees,
+        "budget_funding": budget_funding,
+        "budget_required": budget_required,
+        "margin_scale": margin_scale,
         "current_liquidation": current_isolated_liq,
         "rows": rows,
         "contract_size": contract_size,
@@ -596,6 +613,44 @@ def _calculate_for_leverage(context: dict, p1: float, leverage: int,
         "volume_places": _int(contract.get("volScale"), "volScale", 0),
         "fetched_at": context.get("fetched_at"),
     }
+
+
+def _fit_grid_budget(context: dict, p1: float, leverage: int, hours: float,
+                     opened_mode: int, target_positions: list[dict]) -> dict:
+    account = _asset_usdt(context)
+    available_value = account.get("availableOpen")
+    if available_value is None:
+        available_value = account.get("availableBalance")
+    available = _num(available_value, "account.availableOpen")
+    if available + 1e-9 < GRID_BUDGET:
+        raise GridError("Для запуска сетки на 10 USDT нужно не менее 10 USDT доступного баланса.")
+
+    last_error = None
+    valid_candidate = False
+    for index in range(500):
+        margin_scale = 1.0 - index * MARGIN_SCALE_STEP
+        if margin_scale <= 0:
+            break
+        try:
+            result = _calculate_for_leverage(
+                context, p1, leverage, hours, opened_mode, target_positions,
+                margin_scale=margin_scale,
+            )
+        except GridError as exc:
+            last_error = exc
+            continue
+        valid_candidate = True
+        if result["budget_required"] <= GRID_BUDGET + 1e-9:
+            result["budget_limit"] = GRID_BUDGET
+            return result
+
+    if valid_candidate:
+        raise GridError(
+            "Четыре шага не помещаются в доступные 10 USDT с учётом комиссии и стресс-резерва фандинга."
+        )
+    if last_error:
+        raise last_error
+    raise GridError("Не удалось подобрать размеры четырёх шагов в бюджете MEXC.")
 
 
 def calculate_exchange_grid(p1_text: str, *, context: dict, leverage: int | None = None,
@@ -627,7 +682,7 @@ def calculate_exchange_grid(p1_text: str, *, context: dict, leverage: int | None
         selected = current_lev if leverage is None else _int(leverage, "leverage")
         if not min_lev <= selected <= max_lev:
             raise GridError(f"Для этого аккаунта MEXC плечо должно быть от {min_lev}x до {max_lev}x.")
-        result = _calculate_for_leverage(
+        result = _fit_grid_budget(
             context, p1, selected, hours, open_type, target_positions
         )
         result["target"] = None
@@ -646,7 +701,7 @@ def calculate_exchange_grid(p1_text: str, *, context: dict, leverage: int | None
     candidates = []
     for candidate in range(min_lev, max_lev + 1):
         try:
-            item = _calculate_for_leverage(context, p1, candidate, hours, open_type, [])
+            item = _fit_grid_budget(context, p1, candidate, hours, open_type, [])
             candidates.append(item)
         except GridError:
             continue

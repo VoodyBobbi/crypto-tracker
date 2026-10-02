@@ -36,7 +36,10 @@
           <input id="hours" inputmode="decimal" type="number" min="0" max="720" step="1" value="24"></label>
         <button class="go" type="submit">Рассчитать сетку</button>
       </form>
-      <div id="exchange-info" class="status bad">Нужен API-ключ MEXC только для чтения.</div>
+      <button type="button" id="launch" class="go launch">Запустить LONG-сетку · 10 USDT</button>
+      <p class="muted" id="launch-note">Отправляет реальные ордера. Нужны Order Placing, изолированная маржа и не менее 10 USDT свободного баланса. Если первый IOC исполнится не полностью, следующие шаги не ставятся.</p>
+      <p id="launch-status" class="launch-status" aria-live="polite" hidden></p>
+      <div id="exchange-info" class="status bad">Для расчёта нужен ключ MEXC только для чтения; для запуска — Order Placing.</div>
       <p id="error" class="oops" hidden></p>
       <div id="result" hidden>
         <div class="head"><span class="lev">Плечо <b id="lev">—</b></span><span class="mmr" id="mmr-label">—</span></div>

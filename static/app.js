@@ -2,7 +2,7 @@
   "use strict";
   var $ = function (id) { return document.getElementById(id); };
   var pair = null, live = true, mode = "leverage", lastParams = null, busy = false;
-  var pairRows = {}, online = false, dataTs = 0, searchTimer = null;
+  var pairRows = {}, online = false, dataTs = 0, searchTimer = null, launchUsed = false;
   var colors = ["#ffd23f", "#ff7aa8", "#4be0a8", "#6cc4ff", "#c9a7ff", "#ffa94d"];
 
   function el(tag, cls, text) {
@@ -163,6 +163,9 @@
     $("panel").hidden = false;
     $("title").textContent = p.base + " / USDT";
     $("result").hidden = true;
+    launchUsed = false;
+    $("launch").disabled = false;
+    $("launch-status").hidden = true;
     $("leverage").value = "";
     showError("");
     setLive(true);
@@ -213,6 +216,54 @@
     event.preventDefault();
     calculate(false);
   });
+  $("launch").addEventListener("click", function () {
+    if (busy || !pair || launchUsed) return;
+    busy = true;
+    launchUsed = true;
+    $("launch").disabled = true;
+    var status = $("launch-status");
+    status.className = "launch-status";
+    status.textContent = "Проверяю баланс и параметры MEXC…";
+    status.hidden = false;
+    fetch("/api/grid/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        symbol: pair.symbol,
+        mode: mode,
+        target_liq: $("target").value,
+        leverage: $("leverage").value,
+        hours_until_step4: $("hours").value
+      })
+    }).then(function (response) {
+      return response.json().then(function (data) {
+        if (!response.ok || data.error) {
+          launchUsed = Boolean(data.first_order_id || data.status_unknown);
+          $("launch").disabled = launchUsed;
+          var message = data.error || "MEXC отклонила запуск сетки.";
+          if (data.first_order_id) message += " Первый ордер: " + data.first_order_id + ".";
+          throw new Error(message);
+        }
+        return data;
+      });
+    }).then(function (data) {
+      var lines = ["Ордер " + data.first_order_id + " исполнен по " +
+        fmt(data.first_fill_price, pair.places) + "."];
+      data.limits.forEach(function (order) {
+        lines.push("Шаг " + order.step + ": лимит " + fmt(order.price, pair.places) +
+          ", ордер " + order.order_id + ".");
+      });
+      lines.push("Резерв: " + fmt(data.budget_required, 4) + " из " +
+        fmt(data.budget_limit, 2) + " USDT (маржа, комиссия и фандинг до шага 4).");
+      status.className = "launch-status ok";
+      status.textContent = lines.join("\n");
+    }).catch(function (error) {
+      status.className = "launch-status bad";
+      status.textContent = error.message + " Проверь ордера на MEXC перед повторным запуском.";
+    }).then(function () {
+      busy = false;
+    });
+  });
   function render(data) {
     $("lev").textContent = data.leverage + "x";
     $("mmr-label").textContent = data.mode + " · MMR " + (data.mmr * 100).toFixed(3) +
@@ -234,7 +285,7 @@
     });
     $("estimate-note").textContent = "Стресс-оценка на " + data.hours +
       " ч: весь объём считается открытым весь срок, взяты максимальная текущая ставка фандинга MEXC " +
-      "и наибольшая ставка комиссии аккаунта. " +
+      "плюс резерв одного дополнительного списания, а также наибольшая оценка API-комиссии. " +
       "Будущие цены и ставки могут измениться; это не гарантия от ликвидации.";
     $("result").hidden = false;
   }
