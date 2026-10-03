@@ -27,7 +27,7 @@ if errorlevel 1 goto setup_error
 :deps
 ".venv\Scripts\python.exe" -m pip install --disable-pip-version-check -q -r requirements.txt
 if errorlevel 1 goto setup_error
-".venv\Scripts\python.exe" app.py
+start "" /b ".venv\Scripts\pythonw.exe" app.py
 goto :eof
 
 :setup_error
