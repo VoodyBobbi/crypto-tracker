@@ -268,7 +268,8 @@
     $("lev").textContent = data.leverage + "x";
     $("mmr-label").textContent = data.mode + " · MMR " + (data.mmr * 100).toFixed(3) +
       "% · комиссия до " + (data.fee_rate * 100).toFixed(4) +
-      "% · стресс-фандинг " + (data.funding_stress_rate * 100).toFixed(4) +
+      "% · фандинг сейчас " + (Number(data.funding_rate) * 100).toFixed(4) +
+      "% · в резерв заложено " + (data.funding_stress_rate * 100).toFixed(4) +
       "% × " + data.funding_events + " спис.";
     var body = $("rows");
     body.replaceChildren();

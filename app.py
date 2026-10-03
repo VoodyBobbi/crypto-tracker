@@ -10,7 +10,8 @@ from flask import Flask, jsonify, render_template, request
 
 import mexc
 from grid import (API_MAKER_FEE_FLOOR, API_TAKER_FEE_FLOOR, GridError,
-                  calculate_exchange_grid)
+                  calculate_exchange_grid, funding_event_count,
+                  funding_stress_rate)
 
 app = Flask(__name__)
 app.json.ensure_ascii = False
@@ -351,9 +352,16 @@ def api_grid_start():
             raise GridError("Первый вход открыт, но MEXC не вернула цену ликвидации; лимитки не выставлены.")
 
         new_funding = actual_context.get("funding") or {}
-        new_stress_rate = max(0.0, _number(new_funding.get("maxFundingRate"), 0))
-        if new_stress_rate > result["funding_stress_rate"] + 1e-12:
-            raise GridError("Первый вход открыт, но ставка фандинга выросла; лимитки не выставлены.")
+        new_stress_rate = funding_stress_rate(new_funding, 1)
+        new_funding_events = funding_event_count(new_funding, result["hours"])
+        new_funding_reserve = new_stress_rate * new_funding_events
+        planned_funding_reserve = result["funding_stress_rate"] * result["funding_events"]
+        if new_funding_reserve > planned_funding_reserve + 1e-12:
+            raise GridError(
+                "Первый вход открыт, но новый расчётный резерв фандинга выше заложенного "
+                "по ставке или числу выплат; "
+                "лимитки не выставлены."
+            )
 
         shift = fill_price - first["price"]
         projected_liquidations = [row["liq"] + shift for row in result["rows"]]

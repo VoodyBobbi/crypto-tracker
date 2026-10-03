@@ -11,6 +11,8 @@ GRID_BUDGET = 10.0
 API_MAKER_FEE_FLOOR = 0.0006
 API_TAKER_FEE_FLOOR = 0.0008
 MARGIN_SCALE_STEP = 0.002
+FUNDING_SAFETY = 3.0
+FUNDING_FLOOR = 0.0001
 
 
 class GridError(ValueError):
@@ -213,10 +215,28 @@ def _funding_events(funding: dict, hours: float) -> int:
     return 1 + int((end_time - next_time) // cycle_ms)
 
 
-def _adverse_funding_rate(funding: dict, position_type: int) -> float:
-    if position_type == 1:  # Longs pay when the rate is positive.
-        return max(0.0, _num(funding.get("maxFundingRate"), "funding.maxFundingRate"))
-    return max(0.0, -_num(funding.get("minFundingRate"), "funding.minFundingRate"))
+def funding_event_count(funding: dict, hours: float) -> int:
+    """Count scheduled settlements through the horizon plus one reserve event."""
+    if hours <= 0:
+        return 0
+    return _funding_events(funding, hours) + 1
+
+
+def funding_stress_rate(funding: dict, position_type: int) -> float:
+    """Estimate adverse funding per settlement with a local safety buffer.
+
+    Funding is only known near the next settlement. The multiplier and floor
+    are conservative planning assumptions; the API-provided cap is used as
+    the current upper bound, not as a guarantee about future settlements.
+    """
+    current = _num(funding.get("fundingRate"), "funding.fundingRate")
+    if position_type == 1:  # Longs pay when funding is positive.
+        cap = max(0.0, _num(funding.get("maxFundingRate"), "funding.maxFundingRate"))
+        paying_rate = max(0.0, current)
+    else:  # Shorts pay when funding is negative.
+        cap = max(0.0, -_num(funding.get("minFundingRate"), "funding.minFundingRate"))
+        paying_rate = max(0.0, -current)
+    return min(cap, max(FUNDING_FLOOR, paying_rate * FUNDING_SAFETY))
 
 
 def _leverage_settings(context: dict, target_positions: list[dict]) -> tuple[int, int, int, int]:
@@ -328,8 +348,8 @@ def _calculate_for_leverage(context: dict, p1: float, leverage: int,
         raise GridError("MEXC вернула некорректную fair price.")
     funding = context.get("funding") or {}
     _check_market_freshness(context, funding)
-    funding_rate = _adverse_funding_rate(funding, 1)
-    funding_events = _funding_events(funding, hours) + (1 if hours > 0 else 0)
+    funding_rate = funding_stress_rate(funding, 1)
+    funding_events = funding_event_count(funding, hours)
     fee_rate = _fee_rate(context)
     liquidation_fee_rate = _num(contract.get("liquidationFeeRate"), "liquidationFeeRate")
     contract_size = _num(contract.get("contractSize"), "contractSize")
@@ -447,8 +467,8 @@ def _calculate_for_leverage(context: dict, p1: float, leverage: int,
             if not other_funding:
                 raise GridError(f"Нет ставки фандинга для открытой позиции {other_symbol}.")
             side = _int(row.get("positionType"), "position.positionType")
-            adverse_rate = _adverse_funding_rate(other_funding, side)
-            other_events = _funding_events(other_funding, hours) + (1 if hours > 0 else 0)
+            adverse_rate = funding_stress_rate(other_funding, side)
+            other_events = funding_event_count(other_funding, hours)
             market_fair = _num(other_funding.get("fairPrice"), f"{other_symbol}.fairPrice")
             other_notional = max(entry_value, market_fair * quantity)
             other_future_funding += adverse_rate * other_notional * other_events
@@ -522,7 +542,7 @@ def _calculate_for_leverage(context: dict, p1: float, leverage: int,
         short_maintenance = short_entry_value * all_short_rate
         funding_cost = funding_rate * long_risk_value * funding_events
         if opened_mode == 2 and short_quantity:
-            short_funding_rate = _adverse_funding_rate(funding, 2)
+            short_funding_rate = funding_stress_rate(funding, 2)
             funding_cost += short_funding_rate * short_risk_value * funding_events
         if opened_mode == 1:
             margin_buffer = isolated_base_margin + total_new_margin - total_entry_fees - funding_cost
@@ -646,7 +666,7 @@ def _fit_grid_budget(context: dict, p1: float, leverage: int, hours: float,
 
     if valid_candidate:
         raise GridError(
-            "Четыре шага не помещаются в доступные 10 USDT с учётом комиссии и стресс-резерва фандинга."
+            "Четыре шага не помещаются в доступные 10 USDT с учётом комиссии и резерва на фандинг."
         )
     if last_error:
         raise last_error
