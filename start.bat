@@ -27,7 +27,31 @@ if errorlevel 1 goto setup_error
 :deps
 ".venv\Scripts\python.exe" -m pip install --disable-pip-version-check -q -r requirements.txt
 if errorlevel 1 goto setup_error
-start "" /b ".venv\Scripts\pythonw.exe" app.py
+
+".venv\Scripts\python.exe" -c "from urllib.request import urlopen; page=urlopen('http://127.0.0.1:5000/', timeout=2).read(); raise SystemExit(0 if b'<title>' in page and b'MEXC' in page else 1)" >nul 2>nul
+if not errorlevel 1 goto open_site
+
+netstat -ano | findstr /C:"127.0.0.1:5000" | findstr /C:"LISTENING" >nul
+if not errorlevel 1 goto port_busy
+
+start "" /b ".venv\Scripts\pythonw.exe" "%~dp0app.py"
+for /l %%i in (1,1,20) do (
+    ".venv\Scripts\python.exe" -c "from urllib.request import urlopen; page=urlopen('http://127.0.0.1:5000/', timeout=1).read(); raise SystemExit(0 if b'<title>' in page and b'MEXC' in page else 1)" >nul 2>nul
+    if not errorlevel 1 goto open_site
+    timeout /t 1 /nobreak >nul
+)
+echo The MEXC app did not become available at http://127.0.0.1:5000.
+pause
+goto :eof
+
+:open_site
+start "" "http://127.0.0.1:5000"
+goto :eof
+
+:port_busy
+echo Port 5000 is already in use by another application.
+echo Close that application, then run start.bat again.
+pause
 goto :eof
 
 :setup_error

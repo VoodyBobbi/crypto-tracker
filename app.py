@@ -4,7 +4,6 @@ import threading
 import math
 import time
 import uuid
-import webbrowser
 
 from flask import Flask, jsonify, render_template, request
 
@@ -16,6 +15,7 @@ from grid import (API_MAKER_FEE_FLOOR, API_TAKER_FEE_FLOOR,
 
 app = Flask(__name__)
 app.json.ensure_ascii = False
+app.config["TEMPLATES_AUTO_RELOAD"] = True
 _grid_launch_lock = threading.Lock()
 
 
@@ -462,6 +462,4 @@ def api_grid_start():
 
 
 if __name__ == "__main__":
-    url = "http://127.0.0.1:5000"
-    threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     app.run(host="127.0.0.1", port=5000)
