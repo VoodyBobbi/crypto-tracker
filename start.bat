@@ -29,7 +29,7 @@ if errorlevel 1 goto setup_error
 if errorlevel 1 goto setup_error
 
 ".venv\Scripts\python.exe" -c "from urllib.request import urlopen; page=urlopen('http://127.0.0.1:5000/', timeout=2).read(); raise SystemExit(0 if b'<title>' in page and b'MEXC' in page else 1)" >nul 2>nul
-if not errorlevel 1 goto open_site
+if not errorlevel 1 goto :eof
 
 netstat -ano | findstr /C:"127.0.0.1:5000" | findstr /C:"LISTENING" >nul
 if not errorlevel 1 goto port_busy
