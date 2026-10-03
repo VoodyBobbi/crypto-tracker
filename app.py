@@ -9,7 +9,8 @@ import webbrowser
 from flask import Flask, jsonify, render_template, request
 
 import mexc
-from grid import (API_MAKER_FEE_FLOOR, API_TAKER_FEE_FLOOR, GridError,
+from grid import (API_MAKER_FEE_FLOOR, API_TAKER_FEE_FLOOR,
+                  DEFAULT_HOURS_UNTIL_STEP4, GridError,
                   calculate_exchange_grid, funding_event_count,
                   funding_stress_rate)
 
@@ -145,7 +146,7 @@ def api_grid():
         context = mexc.risk_context(symbol)
         result = calculate_exchange_grid(
             data.get("p1", ""), context=context, leverage=leverage, target=target,
-            hours_until_step4=data.get("hours_until_step4", 24))
+            hours_until_step4=DEFAULT_HOURS_UNTIL_STEP4)
         result["rows"] = [{
             **row,
             "price": round(row["price"], result["places"]),
@@ -290,7 +291,7 @@ def api_grid_start():
                   if mode == "target" else None)
         result = calculate_exchange_grid(
             first_cap, context=context, leverage=leverage, target=target,
-            hours_until_step4=data.get("hours_until_step4", 24),
+            hours_until_step4=DEFAULT_HOURS_UNTIL_STEP4,
         )
         if result["open_type"] != 1:
             raise GridError(

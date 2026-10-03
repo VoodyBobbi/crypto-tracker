@@ -192,8 +192,7 @@
       symbol: pair.symbol,
       mode: mode,
       target_liq: $("target").value,
-      leverage: $("leverage").value,
-      hours_until_step4: $("hours").value
+      leverage: $("leverage").value
     };
     if (!params) return;
     busy = true;
@@ -232,8 +231,7 @@
         symbol: pair.symbol,
         mode: mode,
         target_liq: $("target").value,
-        leverage: $("leverage").value,
-        hours_until_step4: $("hours").value
+        leverage: $("leverage").value
       })
     }).then(function (response) {
       return response.json().then(function (data) {
@@ -284,15 +282,14 @@
       tr.append(el("td", "right", (row.mmr * 100).toFixed(3) + "%"));
       body.append(tr);
     });
-    $("estimate-note").textContent = "Стресс-оценка на " + data.hours +
-      " ч: весь объём считается открытым весь срок, взяты максимальная текущая ставка фандинга MEXC " +
-      "плюс резерв одного дополнительного списания, а также наибольшая оценка API-комиссии. " +
-      "Будущие цены и ставки могут измениться; это не гарантия от ликвидации.";
+    $("estimate-note").textContent = "Резерв фандинга рассчитан на внутренний срок 24 ч плюс одно дополнительное списание. " +
+      "Для расчёта берётся запас по текущей ставке MEXC; фактическая ставка и расписание могут измениться. " +
+      "Оценка не гарантирует защиту от ликвидации.";
     $("result").hidden = false;
   }
   $("p1").addEventListener("input", function () { if (live) setLive(false); });
   $("live").addEventListener("click", function () { setLive(!live); });
-  ["target", "leverage", "hours"].forEach(function (id) {
+  ["target", "leverage"].forEach(function (id) {
     $(id).addEventListener("input", function () { lastParams = null; });
   });
   $("search").addEventListener("input", function () {

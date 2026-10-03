@@ -8,6 +8,7 @@ import time
 MARGINS = (1.0, 2.0, 3.0, 4.0)
 ENTRY_COEF = 0.85
 GRID_BUDGET = 10.0
+DEFAULT_HOURS_UNTIL_STEP4 = 24.0
 API_MAKER_FEE_FLOOR = 0.0006
 API_TAKER_FEE_FLOOR = 0.0008
 MARGIN_SCALE_STEP = 0.002
@@ -675,7 +676,7 @@ def _fit_grid_budget(context: dict, p1: float, leverage: int, hours: float,
 
 def calculate_exchange_grid(p1_text: str, *, context: dict, leverage: int | None = None,
                             target: float | None = None,
-                            hours_until_step4: float = 24) -> dict:
+                            hours_until_step4: float = DEFAULT_HOURS_UNTIL_STEP4) -> dict:
     try:
         p1 = float(str(p1_text or context.get("fair_price", "")).strip().replace(",", "."))
     except (TypeError, ValueError) as exc:
